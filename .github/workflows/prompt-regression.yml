@@ -100,10 +100,12 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MODE: ${{ steps.mode.outputs.mode }}
-          # Cost ceiling (Iris condition 4 / Cora). Defaults to $5.00
-          # for workflow_dispatch; PR runs hard-cap at $2.00.
+          # Cost ceiling (Iris condition 4 / Cora). Defaults to $5.00 for
+          # workflow_dispatch; PR runs hard-cap at $2.00. run.py reads
+          # MAX_COST_USD from env (the --max-cost-usd CLI flag lands with
+          # PR #13's wired run_live, then this env var becomes redundant).
           MAX_COST_USD: ${{ inputs.max_cost_usd || '2.00' }}
-        run: python simulation/run.py --mode "$MODE" --max-cost-usd "$MAX_COST_USD"
+        run: python simulation/run.py --mode "$MODE"
 
       - name: Comment on PR (dry-run notice)
         if: steps.mode.outputs.mode == 'dry-run' && github.event_name == 'pull_request'
