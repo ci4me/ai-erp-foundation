@@ -99,6 +99,19 @@ def check_persona_references(scenario: dict[str, Any], available_personas: set[s
     return missing
 
 
+def _scenario_warning(scenario: dict[str, Any]) -> str | None:
+    """Return a warning string for non-active scenarios, or ``None``.
+
+    Implements Theo's retirement-policy concern from PR #10: scenarios with
+    ``status: deprecated|retired`` still execute, but the harness must surface
+    that fact so stale evaluation cases don't rot silently.
+    """
+    status = scenario.get("status", "active")
+    if status == "active":
+        return None
+    return f"WARNING: scenario {scenario.get('id', '<no id>')} status={status!r} — still executing but flagged for retirement"
+
+
 def run_dry(scenarios: list[Path], schema: dict[str, Any], personas: set[str]) -> list[ScenarioResult]:
     """Validate scenarios and report what would run, without API calls."""
     results: list[ScenarioResult] = []
@@ -111,6 +124,9 @@ def run_dry(scenarios: list[Path], schema: dict[str, Any], personas: set[str]) -
             failures.append(f"schema: {msg}")
         for missing in check_persona_references(scenario, personas):
             failures.append(f"persona '{missing}' referenced but no prompt file at .github/agent-prompts/{missing}.md")
+        warning = _scenario_warning(scenario)
+        if warning is not None:
+            print(warning, file=sys.stderr)
         invocations = len(scenario.get("personas", []))
         summary = f"{scenario_id}: would invoke {invocations} persona(s) — {[p['id'] for p in scenario.get('personas', [])]}"
         results.append(ScenarioResult(scenario_id, not failures, tuple(failures), summary))

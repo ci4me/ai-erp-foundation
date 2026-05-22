@@ -36,6 +36,14 @@ simulation/
 The default in CI is **`dry-run`** until `ANTHROPIC_API_KEY` is configured
 as a repo secret. Flipping to `live` is a one-issue follow-up.
 
+> ⚠️ **Live mode is not yet implemented.** `run_live()` raises
+> `NotImplementedError` until the Anthropic SDK wiring lands in the
+> follow-up issue ([#11](https://github.com/ci4me/ai-erp-foundation/issues/11)).
+> Until then, this harness catches **structural drift** (renamed
+> personas, malformed scenarios, dangling references) but NOT
+> **behavioral drift** (a prompt change that degrades verdict quality).
+> Per Prism's APPROVE_WITH_CONDITIONS on PR #10.
+
 ## Adding a new scenario
 
 1. Create `scenarios/NNN-name.yml` matching `scenarios/_schema.yml`.

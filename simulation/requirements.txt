@@ -1,3 +1,5 @@
-anthropic>=0.40.0
-pyyaml>=6.0.1
-jsonschema>=4.21.0
+# Pinned per Iris (Security) — exact versions only; hash-pinning is tracked
+# as a follow-up to PR #10 (see CODEOWNERS guarding this directory).
+anthropic==0.40.0
+pyyaml==6.0.2
+jsonschema==4.23.0

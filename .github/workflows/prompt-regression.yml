@@ -37,32 +37,53 @@ jobs:
   regression:
     name: Re-run simulation scenarios
     runs-on: ubuntu-latest
+
+    # Threat model (per Iris's WARN on PR #10):
+    #   - secrets.ANTHROPIC_API_KEY IS in scope for same-repo branches and
+    #     workflow_dispatch — a maintainer-authored branch that modifies
+    #     simulation/run.py runs with the key in env. Treat simulation/**
+    #     and .github/agent-prompts/** changes as security-sensitive in
+    #     CODEOWNERS. Fork PRs do NOT get the secret (GitHub default).
+    #   - pull-requests: write is required only to leave the dry-run notice
+    #     comment; consider scoping to that one step in a follow-up.
     permissions:
       contents: read
       pull-requests: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # v4.2.0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5  # v5.3.0
         with:
           python-version: '3.12'
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r simulation/requirements.txt
+        # Hash-pinning is a follow-up (Iris condition 1, partial).
+        # Versions are pinned to exact in requirements.txt — supply-chain
+        # protection against compromised >= releases.
+        run: pip install -r simulation/requirements-dev.txt
+
+      - name: Run unit tests
+        # Tessa REQUEST_CHANGES on PR #10 mandated this. If run.py logic
+        # breaks, the gate must fail loudly here, not silently downstream.
+        run: pytest simulation/tests/ -v
 
       - name: Determine run mode
         id: mode
+        # Fork-guard (per Iris condition 3): live mode runs only when the
+        # PR head is from this repo. Forks fall back to dry-run regardless
+        # of the dispatch input.
         run: |
-          if [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ] && [ "${{ inputs.mode || 'auto' }}" != "dry-run" ]; then
+          IS_SAME_REPO="${{ github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch' }}"
+          if [ "$IS_SAME_REPO" = "true" ] && [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ] && [ "${{ inputs.mode || 'auto' }}" != "dry-run" ]; then
             echo "mode=live" >> "$GITHUB_OUTPUT"
-            echo "Running in LIVE mode (API key present)."
+            echo "Running in LIVE mode (API key present, same-repo branch)."
           else
             echo "mode=dry-run" >> "$GITHUB_OUTPUT"
-            echo "Running in DRY-RUN mode. Set ANTHROPIC_API_KEY secret to enable live regression checks."
+            echo "Running in DRY-RUN mode. (Set ANTHROPIC_API_KEY secret + same-repo branch to enable live regression checks.)"
           fi
 
       - name: Run regression
@@ -73,7 +94,7 @@ jobs:
 
       - name: Comment on PR (dry-run notice)
         if: steps.mode.outputs.mode == 'dry-run' && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v7  # v7.0.1
         with:
           script: |
             const body = `> ⚠️ \`prompt-regression\` ran in **DRY-RUN** mode.\n> ` +

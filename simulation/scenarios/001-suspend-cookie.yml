@@ -1,5 +1,6 @@
 id: 001-suspend-cookie
 title: SuspendCookie command with multiple planted flaws
+status: active
 description: >
   First regression scenario. Reproduces the mock PR from the parent
   CQRSTemplate repo's simulation run 1 (suspend-cookie) — a flawed

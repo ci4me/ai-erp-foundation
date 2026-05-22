@@ -28,6 +28,15 @@ properties:
     minLength: 5
   description:
     type: string
+  status:
+    type: string
+    enum: [active, deprecated, retired]
+    default: active
+    description: >
+      Lifecycle state (per Theo's retirement-policy concern, PR #10).
+      Non-active scenarios emit a runtime warning so the harness still
+      runs them but the team is forced to acknowledge stale evaluation
+      cases instead of silently rotting.
   mock_pr:
     type: object
     required: [title, body, diff]
