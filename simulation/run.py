@@ -136,19 +136,30 @@ def run_dry(scenarios: list[Path], schema: dict[str, Any], personas: set[str]) -
 def run_live(scenarios: list[Path], schema: dict[str, Any], personas: set[str]) -> list[ScenarioResult]:
     """Dispatch each scenario's personas via the Anthropic API and assert verdicts.
 
-    Live mode is intentionally a thin shim in this PR — it raises NotImplementedError
-    until the Anthropic SDK wiring lands in a follow-up issue. The shim still
-    validates structure (delegates to ``run_dry``) so CI is green and the API
-    surface is reviewable.
+    Delegates to ``simulation._live`` (separate module so this orchestrator
+    stays small). Closes issue #11 — the behavioral regression gate Prism's
+    BLOCK demanded.
     """
     structure_results = run_dry(scenarios, schema, personas)
     if any(not r.passed for r in structure_results):
-        return structure_results  # don't waste API tokens on broken scenarios
-    raise NotImplementedError(
-        "Live mode is not yet wired in this PR. Implementation tracked in sub-issue "
-        "follow-up to #9 (Theme F). The Anthropic SDK call site, prompt assembly, "
-        "and verdict-parser belong in a focused PR with its own review."
-    )
+        return structure_results  # do not waste API tokens on broken scenarios
+
+    from simulation import _live  # late import — anthropic SDK only needed in live mode
+
+    live_results = _live.run(scenarios)
+    return [
+        ScenarioResult(
+            scenario_id=live_result.scenario_id,
+            passed=live_result.passed,
+            failures=tuple(live_result.failure_reasons),
+            summary=(
+                f"{live_result.scenario_id}: {len(live_result.personas)} persona(s), "
+                f"${live_result.total_cost_usd:.4f}, "
+                f"{'PASS' if live_result.passed else 'FAIL'}"
+            ),
+        )
+        for live_result in live_results
+    ]
 
 
 def report(results: list[ScenarioResult], mode: str) -> int:
