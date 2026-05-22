@@ -1,0 +1,132 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://github.com/ci4me/ai-erp-foundation/simulation/scenarios/_schema.yml
+title: Persona-regression scenario
+description: >
+  A reusable, executable description of a mock pull request, the planted
+  flaws within it, and the personas that are expected to detect them. The
+  scenario is the falsifiability layer for persona-prompt edits: if a
+  prompt change causes a scenario to stop passing, the prompt regressed.
+
+type: object
+required:
+  - id
+  - title
+  - mock_pr
+  - planted_flaws
+  - personas
+  - expected_overall_verdict
+  - pass_threshold
+additionalProperties: false
+
+properties:
+  id:
+    type: string
+    pattern: '^[0-9]{3}-[a-z0-9-]+$'
+    description: Slug like "001-suspend-cookie".
+  title:
+    type: string
+    minLength: 5
+  description:
+    type: string
+  status:
+    type: string
+    enum: [active, deprecated, retired]
+    default: active
+    description: >
+      Lifecycle state (per Theo's retirement-policy concern, PR #10).
+      Non-active scenarios emit a runtime warning so the harness still
+      runs them but the team is forced to acknowledge stale evaluation
+      cases instead of silently rotting.
+  mock_pr:
+    type: object
+    required: [title, body, diff]
+    additionalProperties: false
+    properties:
+      title:
+        type: string
+      body:
+        type: string
+      diff:
+        type: string
+      labels:
+        type: array
+        items:
+          type: string
+      risk:
+        type: string
+        enum: [risk:low, risk:medium, risk:high, risk:critical]
+  planted_flaws:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [id, name, severity]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          pattern: '^F[0-9]+$'
+        name:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        detail:
+          type: string
+  personas:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      required: [id, expected_verdict, must_catch]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          description: Slug matching a file under .github/agent-prompts/<id>.md.
+          pattern: '^[a-z0-9-]+$'
+        expected_verdict:
+          type: string
+          enum:
+            - APPROVE
+            - APPROVE_WITH_CONDITIONS
+            - REQUEST_CHANGES
+            - COMMENT
+            - ABSTAIN
+            - PASS
+            - WARN
+            - FAIL
+            - BLOCKED
+            - MERGE_READY
+            - READY_FOR_AGENT
+            - NEEDS_TRIAGE
+        must_catch:
+          type: array
+          items:
+            type: string
+            pattern: '^F[0-9]+$'
+        may_catch:
+          type: array
+          items:
+            type: string
+            pattern: '^F[0-9]+$'
+        model_override:
+          type: string
+          description: Force a non-default model for this persona in this scenario.
+  expected_overall_verdict:
+    type: string
+    enum: [APPROVE, BLOCKED, MERGE_READY, REQUEST_CHANGES]
+  pass_threshold:
+    type: object
+    required: [flaws_caught_pct, hallucinations_allowed, per_persona_verdict_match]
+    additionalProperties: false
+    properties:
+      flaws_caught_pct:
+        type: number
+        minimum: 0
+        maximum: 100
+      hallucinations_allowed:
+        type: integer
+        minimum: 0
+      per_persona_verdict_match:
+        type: boolean

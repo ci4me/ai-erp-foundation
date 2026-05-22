@@ -1,0 +1,111 @@
+name: Prompt Regression
+
+# Re-runs every simulation scenario whenever a persona prompt or scenario
+# YAML changes. Blocks merge on regression (any scenario fails the
+# pass-criteria threshold).
+#
+# Modes:
+#   - dry-run (default; no ANTHROPIC_API_KEY secret) — validates YAML
+#     structure, lists personas that WOULD be invoked, exits 0.
+#   - live (ANTHROPIC_API_KEY configured) — dispatches each scenario's
+#     personas via the Anthropic API, asserts verdicts against
+#     expected_verdict + must_catch flaws + hallucination check.
+#
+# Closes ADR-001 Theme F condition for "prompt-regression CI gate"
+# (Discussion #2 + sub-issue #9). Closes Prism's BLOCK condition 2.
+# Closes Iris's WARN about silent prompt mutation (header validator
+# is a separate workflow).
+
+on:
+  pull_request:
+    paths:
+      - '.github/agent-prompts/**'
+      - 'simulation/**'
+      - '.github/workflows/prompt-regression.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode — dry-run or live'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - dry-run
+          - live
+
+jobs:
+  regression:
+    name: Re-run simulation scenarios
+    runs-on: ubuntu-latest
+
+    # Threat model (per Iris's WARN on PR #10):
+    #   - secrets.ANTHROPIC_API_KEY IS in scope for same-repo branches and
+    #     workflow_dispatch — a maintainer-authored branch that modifies
+    #     simulation/run.py runs with the key in env. Treat simulation/**
+    #     and .github/agent-prompts/** changes as security-sensitive in
+    #     CODEOWNERS. Fork PRs do NOT get the secret (GitHub default).
+    #   - pull-requests: write is required only to leave the dry-run notice
+    #     comment; consider scoping to that one step in a follow-up.
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4  # v4.2.0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5  # v5.3.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        # Hash-pinning is a follow-up (Iris condition 1, partial).
+        # Versions are pinned to exact in requirements.txt — supply-chain
+        # protection against compromised >= releases.
+        run: pip install -r simulation/requirements-dev.txt
+
+      - name: Run unit tests
+        # Tessa REQUEST_CHANGES on PR #10 mandated this. If run.py logic
+        # breaks, the gate must fail loudly here, not silently downstream.
+        run: pytest simulation/tests/ -v
+
+      - name: Determine run mode
+        id: mode
+        # Fork-guard (per Iris condition 3): live mode runs only when the
+        # PR head is from this repo. Forks fall back to dry-run regardless
+        # of the dispatch input.
+        run: |
+          IS_SAME_REPO="${{ github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch' }}"
+          if [ "$IS_SAME_REPO" = "true" ] && [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ] && [ "${{ inputs.mode || 'auto' }}" != "dry-run" ]; then
+            echo "mode=live" >> "$GITHUB_OUTPUT"
+            echo "Running in LIVE mode (API key present, same-repo branch)."
+          else
+            echo "mode=dry-run" >> "$GITHUB_OUTPUT"
+            echo "Running in DRY-RUN mode. (Set ANTHROPIC_API_KEY secret + same-repo branch to enable live regression checks.)"
+          fi
+
+      - name: Run regression
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: python simulation/run.py --mode "$MODE"
+
+      - name: Comment on PR (dry-run notice)
+        if: steps.mode.outputs.mode == 'dry-run' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7  # v7.0.1
+        with:
+          script: |
+            const body = `> ⚠️ \`prompt-regression\` ran in **DRY-RUN** mode.\n> ` +
+              `The workflow validated scenario YAML schema and listed personas ` +
+              `that would be invoked, but did NOT call the Anthropic API.\n>\n> ` +
+              `To enable live regression checks, configure repo secret ` +
+              `\`ANTHROPIC_API_KEY\`. See sub-issue #9 (Theme F) for the rollout plan.\n>\n> ` +
+              `_Posted by Prompt Regression workflow._`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });

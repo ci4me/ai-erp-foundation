@@ -1,0 +1,129 @@
+id: 001-suspend-cookie
+title: SuspendCookie command with multiple planted flaws
+status: active
+description: >
+  First regression scenario. Reproduces the mock PR from the parent
+  CQRSTemplate repo's simulation run 1 (suspend-cookie) — a flawed
+  command/handler/aggregate triple with 7 planted issues. Validates that
+  the architect, test-lead, security, audit, and release personas all
+  produce the expected verdicts and catch the expected flaws.
+
+mock_pr:
+  title: 'feat(cookie): add suspend command for compliance holds'
+  body: |
+    Closes #N. Adds suspend command, handler, aggregate method, and a
+    happy-path test.
+  risk: risk:low
+  labels:
+    - area:domain
+  diff: |
+    diff --git a/app/Domain/Cookie/Commands/SuspendCookie/SuspendCookieCommand.php
+    new file mode 100644
+    +<?php
+    +declare(strict_types=1);
+    +
+    +namespace App\Domain\Cookie\Commands\SuspendCookie;
+    +
+    +final readonly class SuspendCookieCommand
+    +{
+    +    public function __construct(
+    +        public string $cookieId,
+    +        public string $reason,
+    +    ) {}
+    +}
+
+    diff --git a/app/Domain/Cookie/Commands/SuspendCookie/SuspendCookieHandler.php
+    +final class SuspendCookieHandler
+    +{
+    +    public function __construct(private CookieRepository $repo) {}
+    +
+    +    public function handle(SuspendCookieCommand $command): void
+    +    {
+    +        $cookie = $this->repo->findById($command->cookieId);
+    +        $cookie->suspend($command->reason);
+    +        $this->repo->save($cookie);
+    +    }
+    +}
+
+    diff --git a/app/Domain/Cookie/Entities/Cookie.php
+    @@ class Cookie
+    +    public function suspend(string $reason): void
+    +    {
+    +        if ($this->status === CookieStatus::Suspended) {
+    +            throw new \DomainException('Cookie already suspended');
+    +        }
+    +        if (empty($reason)) {
+    +            throw new \DomainException('Reason required');
+    +        }
+    +        if (strlen($reason) < 10) {
+    +            throw new \DomainException('Reason must be at least 10 characters');
+    +        }
+    +        if (strlen($reason) > 500) {
+    +            throw new \DomainException('Reason too long');
+    +        }
+    +        $this->status = CookieStatus::Suspended;
+    +        $this->suspendedAt = new \DateTimeImmutable();
+    +        $this->suspensionReason = $reason;
+    +        // audit
+    +        error_log("Cookie {$this->id} suspended: {$reason}");
+    +        $this->touchUpdatedAt();
+    +    }
+
+    diff --git a/tests/Unit/Cookie/SuspendCookieHandlerTest.php
+    +final class SuspendCookieHandlerTest extends TestCase
+    +{
+    +    public function test_it_suspends_cookie_with_valid_reason(): void
+    +    {
+    +        $cookie = CookieMother::active();
+    +        $repo = new InMemoryCookieRepository([$cookie]);
+    +        $handler = new SuspendCookieHandler($repo);
+    +        $handler->handle(new SuspendCookieCommand($cookie->id(), 'compliance hold review needed'));
+    +        $this->assertTrue($cookie->isSuspended());
+    +    }
+    +}
+
+planted_flaws:
+  - id: F1
+    name: Command missing Actor parameter
+    severity: high
+    detail: SuspendCookieCommand has no actor field; breaks the established actor-propagation contract used by DeleteCookieCommand and RestoreCookieCommand.
+  - id: F2
+    name: Aggregate state-transition emits no domain event
+    severity: high
+    detail: Cookie::suspend() mutates state but raises no CookieSuspended event; every other Cookie lifecycle method raises one.
+  - id: F3
+    name: error_log used as audit mechanism in domain layer
+    severity: high
+    detail: error_log in Cookie::suspend() bypasses Monolog / PSR-3 logging architecture and performs I/O inside the domain layer.
+  - id: F4
+    name: suspend() mixes multiple responsibilities (SRP violation)
+    severity: medium
+    detail: Validation + state mutation + audit + timestamp in one method. Validation belongs in a SuspensionReason value object.
+  - id: F5
+    name: Tests cover only happy path; invariants untested
+    severity: high
+    detail: "Missing: already-suspended throws, reason-too-short throws, reason-too-long throws, cannot-activate-while-suspended."
+  - id: F6
+    name: Risk label underclassified
+    severity: high
+    detail: 'Author labeled risk:low; new aggregate state + audit-relevant transition should be risk:medium at minimum.'
+  - id: F7
+    name: '"Cannot be activated while suspended" acceptance criterion is unimplemented'
+    severity: high
+    detail: No guard added to Cookie::activate() rejecting Suspended state, and no unsuspend command exists.
+
+personas:
+  - id: theo-architect
+    expected_verdict: REQUEST_CHANGES
+    must_catch: [F1, F2, F7]
+    may_catch: [F3, F4]
+  - id: ari-orchestrator
+    expected_verdict: BLOCKED
+    must_catch: [F6]
+
+expected_overall_verdict: BLOCKED
+
+pass_threshold:
+  flaws_caught_pct: 70
+  hallucinations_allowed: 0
+  per_persona_verdict_match: true
