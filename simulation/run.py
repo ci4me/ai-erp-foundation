@@ -139,6 +139,10 @@ def run_live(scenarios: list[Path], schema: dict[str, Any], personas: set[str]) 
     Delegates to ``simulation._live`` (separate module so this orchestrator
     stays small). Closes issue #11 — the behavioral regression gate Prism's
     BLOCK demanded.
+
+    Cost ceiling resolution order (per Iris's PR #17 review):
+      1. ``MAX_COST_USD`` environment variable (set by the workflow).
+      2. Fallback to ``_live._DEFAULT_MAX_COST_PER_SCENARIO_USD``.
     """
     structure_results = run_dry(scenarios, schema, personas)
     if any(not r.passed for r in structure_results):
@@ -146,7 +150,15 @@ def run_live(scenarios: list[Path], schema: dict[str, Any], personas: set[str]) 
 
     from simulation import _live  # late import — anthropic SDK only needed in live mode
 
-    live_results = _live.run(scenarios)
+    ceiling = _live._DEFAULT_MAX_COST_PER_SCENARIO_USD
+    raw_env = os.environ.get("MAX_COST_USD", "").strip()
+    if raw_env:
+        try:
+            ceiling = float(raw_env)
+        except ValueError:
+            print(f"WARNING: MAX_COST_USD={raw_env!r} not a float, using default {ceiling}", file=sys.stderr)
+
+    live_results = _live.run(scenarios, max_cost_per_scenario_usd=ceiling)
     return [
         ScenarioResult(
             scenario_id=live_result.scenario_id,
