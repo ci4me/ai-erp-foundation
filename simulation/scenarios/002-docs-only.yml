@@ -1,0 +1,69 @@
+id: 002-docs-only
+title: Docs-only PR (false-positive resistance test)
+status: active
+description: >
+  Validates that reviewer personas do NOT invent flaws on a clean
+  docs-only change. The mock PR is a single Markdown file under
+  docs/ that documents the cookie logging conventions. No runtime
+  code changes, no schema changes, no security surface. If a
+  reviewer persona BLOCKs or REQUEST_CHANGES on this scenario, the
+  prompt has drifted toward false-positive paranoia and the
+  regression gate must reject the prompt change. Reproduces scenario
+  002 from the parent CQRSTemplate sim run 2.
+
+mock_pr:
+  title: 'docs(cookie): document logging conventions'
+  body: |
+    Closes #N. Adds docs/cookie/logging.md describing the cookie
+    Monolog channel and required PSR-3 context keys.
+
+    Single new file. Docs-only. No runtime code changes.
+  risk: risk:low
+  labels:
+    - area:docs
+  diff: |
+    diff --git a/docs/cookie/logging.md b/docs/cookie/logging.md
+    new file mode 100644
+    +# Cookie Domain Logging
+    +
+    +## Channel
+    +
+    +All Cookie command/query handlers log to the `cookie` Monolog channel.
+    +
+    +## Required PSR-3 context keys
+    +
+    +| Key | Type | Example |
+    +| --- | --- | --- |
+    +| domain | string | "Cookie" |
+    +| command | string | "CreateCookieCommand" |
+    +| cookie_id | int | 42 |
+    +| duration_ms | float | 12.34 |
+    +| error_code | int | 101 |
+    +
+    +## Reference
+    +
+    +See `.claude/documentation/LOGGING_BEST_PRACTICES.md` for the
+    +project-wide logging architecture.
+
+planted_flaws: []  # intentionally NONE — this is the false-positive guard
+
+personas:
+  - id: theo-architect
+    expected_verdict: APPROVE
+    must_catch: []
+    may_catch: []
+  - id: tessa-test-lead
+    expected_verdict: APPROVE
+    must_catch: []
+    may_catch: []
+  - id: ari-orchestrator
+    expected_verdict: MERGE_READY
+    must_catch: []
+    may_catch: []
+
+expected_overall_verdict: MERGE_READY
+
+pass_threshold:
+  flaws_caught_pct: 100  # vacuous: 0 of 0 = 100 %. Real check is verdict_match.
+  hallucinations_allowed: 0
+  per_persona_verdict_match: true
