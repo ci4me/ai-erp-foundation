@@ -13,6 +13,7 @@ Invoked by ``.github/workflows/cost-telemetry.yml`` weekly and on demand.
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import os
 import sys
@@ -29,9 +30,15 @@ _ROLLING_WINDOW_DAYS = 7
 
 
 def _parse_iso(ts: str) -> float | None:
-    """Parse an ISO-8601 ``Z`` timestamp into epoch seconds; return None on failure."""
+    """Parse an ISO-8601 ``Z`` timestamp into epoch seconds; return None on failure.
+
+    Uses ``calendar.timegm`` (NOT ``time.mktime``) because ``mktime`` treats
+    the parsed ``struct_time`` as local time, which silently drifts the
+    7-day window on non-UTC runners by the TZ offset. Caught by Theo on
+    PR #20 review.
+    """
     try:
-        return time.mktime(time.strptime(ts, "%Y-%m-%dT%H:%M:%SZ"))
+        return float(calendar.timegm(time.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")))
     except (ValueError, TypeError):
         return None
 

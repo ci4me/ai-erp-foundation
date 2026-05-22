@@ -95,14 +95,17 @@ that can't be demoted.
 
 ## Action items (tracked separately)
 
-- [ ] Sub-issue: implement "Action observer" mode in the persona activation
-      logic — persona files gain a `mode: observer | reviewer` field.
-- [ ] Sub-issue: update `.github/agent-prompts/<persona>.md` frontmatter for
-      Lex / Pico / Deck / Doc / Cliff to `mode: observer`.
-- [ ] Sub-issue: tier Nova / Sofia / Kai / Pax to Haiku-by-default with
-      escalation rules.
-- [ ] Sub-issue: re-baseline after first 10 live runs; compare projections to
-      reality on the cost-telemetry issue.
+- [ ] Sub-issue **#21** — implement "Action observer" `mode` in persona
+      activation; persona files gain a `mode: observer | reviewer` frontmatter
+      field; backing code in `simulation/_live.py` routes `mode: observer`
+      personas to a deterministic adapter instead of an LLM dispatch.
+- [ ] Sub-issue **#21** (same) — update `.github/agent-prompts/<persona>.md`
+      frontmatter for Lex / Pico / Deck / Doc / Cliff to `mode: observer`.
+- [ ] Sub-issue (TBD) — tier Nova / Sofia / Kai / Pax to Haiku-by-default
+      with escalation rules.
+- [ ] Sub-issue (TBD) — re-baseline after first 10 live runs; compare the
+      35–40 % savings projection to measured spend on the cost-telemetry
+      tracking issue (#19).
 
 ---
 
