@@ -1,0 +1,47 @@
+# Environment & secrets — NEVER commit.
+.env
+.env.local
+.env.*.local
+
+# Dependencies (managed via composer / npm).
+/vendor/
+/node_modules/
+
+# Build / cache artifacts.
+/writable/cache/
+/writable/logs/
+/writable/session/
+/writable/uploads/
+/writable/debugbar/
+/writable/database/
+/public/build/
+*.log
+
+# PHP test / static-analysis cache.
+.phpunit.result.cache
+.phpunit.cache/
+.phpstan.cache/
+.php-cs-fixer.cache
+.deptrac.cache
+coverage/
+coverage.xml
+coverage.txt
+
+# Editor / IDE.
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS junk.
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Local scratch.
+/temp/
+/tmp/
+*.local.php
+*.local.md
