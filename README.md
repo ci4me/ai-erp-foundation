@@ -81,3 +81,7 @@ The next loop selects `create_issue`, creates one bounded `needs-triage` issue, 
 
 The loop may be autonomous, but it is not allowed to trust prose. Every mutation
 must be preceded by validation and followed by a marker-bearing, signed result.
+
+## Acknowledgement
+
+This project is an autonomous-loop achievement: every change reaches main via a signed, marker-bearing PR.
