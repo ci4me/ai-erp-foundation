@@ -1,0 +1,71 @@
+id: 003-critical-migration
+title: Critical database migration with rollback and approval gaps
+status: active
+description: >
+  Regression scenario for risk:critical changes. The mock PR adds a destructive
+  database migration and claims safety without a rollback plan, backup evidence,
+  or human approval marker. Release, risk, audit, database, and security personas
+  must block it.
+
+mock_pr:
+  title: 'feat(cookie): migrate cookie status enum to lookup table'
+  body: |
+    Closes #N. Adds a migration that rewrites cookie status values and drops the
+    old status column after backfill. Risk: critical.
+  risk: risk:critical
+  labels:
+    - area:database
+    - risk:critical
+  diff: |
+    diff --git a/database/migrations/2026-05-23-000001_CookieStatusLookup.php b/database/migrations/2026-05-23-000001_CookieStatusLookup.php
+    new file mode 100644
+    +<?php
+    +final class CookieStatusLookup extends Migration
+    +{
+    +    public function up(): void
+    +    {
+    +        $this->forge->addField(['id' => ['type' => 'INT'], 'name' => ['type' => 'VARCHAR', 'constraint' => 20]]);
+    +        $this->forge->createTable('cookie_statuses');
+    +        $this->db->query("UPDATE cookies SET status = 'archived' WHERE status = 'deleted'");
+    +        $this->forge->dropColumn('cookies', 'status');
+    +    }
+    +    public function down(): void
+    +    {
+    +        // TODO: irreversible
+    +    }
+    +}
+
+planted_flaws:
+  - id: F1
+    name: Irreversible destructive migration
+    severity: critical
+    detail: The migration drops a production column and its down() path is a TODO.
+  - id: F2
+    name: No backup or dry-run evidence
+    severity: critical
+    detail: The PR lacks a backup plan, data-volume estimate, and dry-run migration evidence.
+  - id: F3
+    name: Missing explicit human approval marker for risk:critical
+    severity: critical
+    detail: The PR has no maintainer approval marker for critical risk.
+
+personas:
+  - id: vera-risk-officer
+    expected_verdict: REQUEST_CHANGES
+    must_catch: [F2, F3]
+    may_catch: [F1]
+  - id: dario-database
+    expected_verdict: REQUEST_CHANGES
+    must_catch: [F1, F2]
+    may_catch: []
+  - id: rhea-release-manager
+    expected_verdict: BLOCKED
+    must_catch: [F3]
+    may_catch: [F1, F2]
+
+expected_overall_verdict: BLOCKED
+
+pass_threshold:
+  flaws_caught_pct: 80
+  hallucinations_allowed: 0
+  per_persona_verdict_match: true
