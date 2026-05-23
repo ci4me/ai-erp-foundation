@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from simulation.tools.next_prompt_legacy import main
+from simulation.tools.next_prompt_cli import main
 
 
 if __name__ == "__main__":
