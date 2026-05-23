@@ -271,6 +271,29 @@ fi
 
 Do not select the next reviewer yourself. The next session must run `next_prompt.py` again against GitHub state after your comments exist.
 
+## Important: Self-PR handling
+
+If the PR author is the same identity as the reviewer (i.e. the bot
+opened the PR), **do not** call `gh pr review --request-changes`. The
+GitHub GraphQL backend refuses self-authored REQUEST_CHANGES reviews
+and the command will fail.
+
+Fallback:
+
+```bash
+gh pr comment "{{pr_number}}" --repo "{{repo}}" \
+    --body-file "/tmp/pr-{{pr_number}}-{{persona_id}}-review.md"
+```
+
+The comment body still carries `REVIEW-VERDICT:` so downstream
+selectors (`merge_gate`, `consistency_check`) treat the comment as
+the official review. Detect the self-PR case with:
+
+```bash
+[ "$(gh pr view "{{pr_number}}" --repo "{{repo}}" --json author -q '.author.login')" = "$(gh api user -q '.login')" ] \
+    && REVIEW_FLAG=comment
+```
+
 ## Auto-approval conditions (trivial PRs)
 
 - If the PR fixes an issue labelled `trivial` or `quick-fix` AND the
