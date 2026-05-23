@@ -52,6 +52,43 @@ POLICY_LABEL_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+def apply_policy_labels(
+    issue: dict[str, Any],
+    repo: str,
+    *,
+    runner: Any = None,
+) -> list[str]:
+    """Infer policy labels then **post them** to GitHub via ``gh issue edit``.
+
+    Returns the labels that were actually applied. The ``runner`` callable
+    matches the :mod:`simulation.tools.lock` shape (``args: list[str] ->
+    CompletedProcess``). When omitted we fall back to a real ``gh``
+    subprocess.
+    """
+    from simulation.tools import lock as _lock
+
+    labels = infer_policy_labels(issue)
+    if not labels:
+        return []
+    run = runner or _lock._default_runner
+    number = str(issue.get("number") or "")
+    if not number:
+        return []
+    args = ["issue", "edit", number, "--repo", repo]
+    for label in labels:
+        args.extend(["--add-label", label])
+    result = run(args)
+    if getattr(result, "returncode", 0) != 0:
+        logger.warning("apply_policy_labels failed: %s", getattr(result, "stderr", ""))
+        return []
+    # Mirror locally so subsequent guards see the new labels in this tick.
+    existing = {label.get("name", "") for label in issue.get("labels") or []}
+    issue["labels"] = (issue.get("labels") or []) + [
+        {"name": label} for label in labels if label not in existing
+    ]
+    return labels
+
+
 def infer_policy_labels(issue: dict[str, Any]) -> list[str]:
     """Return labels that should be on an issue but currently are not."""
     body_lower = ((issue.get("body") or "") + " " + (issue.get("title") or "")).lower()
@@ -354,6 +391,7 @@ __all__ = [
     "REQUIRE_COT_KEY",
     "STALL_LIMIT",
     "StallTracker",
+    "apply_policy_labels",
     "cot_requirements",
     "evaluate_chain",
     "infer_policy_labels",
