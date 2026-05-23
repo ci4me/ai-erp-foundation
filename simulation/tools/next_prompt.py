@@ -134,11 +134,48 @@ from simulation.tools.post_action_verify import (
     verify_pr_created,
     verify_pr_merged,
 )
+from simulation.tools.lesson_repository import (
+    DEFAULT_LESSONS_DIR,
+    Lesson,
+    LessonRepository,
+)
+from simulation.tools.lesson_injector import LessonInjector
+from simulation.tools.retrospective import Retrospective
+
+
+def enhance_prompt_with_lessons(
+    *,
+    action_prompt: str,
+    issue_title: str = "",
+    issue_body: str = "",
+    storage_path: str | None = None,
+) -> str:
+    """Inject the top relevant lessons into ``action_prompt`` (no-op if none).
+
+    Disabled by setting ``LEARNING_ENABLED=false`` in the environment so
+    operators can turn the sidecar off without code changes.
+    """
+    import os as _os
+
+    if _os.environ.get("LEARNING_ENABLED", "true").lower() == "false":
+        return action_prompt
+    return LessonInjector(storage_path=storage_path).enhance_prompt(
+        original_prompt=action_prompt,
+        issue_title=issue_title,
+        issue_body=issue_body,
+    )
+
 
 __all__ = [
     "ActionValidationResult",
+    "DEFAULT_LESSONS_DIR",
     "DecisionLog",
     "GuardDecision",
+    "Lesson",
+    "LessonInjector",
+    "LessonRepository",
+    "Retrospective",
+    "enhance_prompt_with_lessons",
     "MAX_RETRIES",
     "MAX_VALIDATION_RETRIES",
     "STALE_DAYS",

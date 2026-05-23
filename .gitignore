@@ -45,3 +45,10 @@ Desktop.ini
 /tmp/
 *.local.php
 *.local.md
+
+# Self-learning lesson store (per-environment, never committed).
+.lessons/
+simulation/data/knowledge_scores.json
+simulation/data/task_history.json
+.bypass_log
+conflicts.md
