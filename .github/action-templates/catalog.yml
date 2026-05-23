@@ -1,0 +1,281 @@
+version: 0.2.0
+description: >
+  Action-type catalog for simulation/tools/next_prompt.py. This file defines
+  actions, templates, policies, and state selectors. It deliberately does NOT
+  assign actions to personas. Persona capabilities live in each persona prompt
+  frontmatter under `actions.primary` and `actions.support`.
+
+actions:
+  - id: review_pr
+    priority: 20
+    template: review-pr.md
+    class: review
+    selector: open_pr_needs_persona_review
+    mutates: pr_review
+    when: An open PR needs a signed persona review.
+    compact_steps: [Read diff first, apply persona lens, post signed PR review, post Epic summary]
+
+  - id: address_changes_requested
+    priority: 10
+    template: address-changes-requested.md
+    class: implementation
+    selector: oldest_pr_with_blocking_review
+    mutates: branch_commit, pr_review
+    when: A PR has a blocking REQUEST_CHANGES / BLOCKED review.
+    compact_steps: [Checkout PR branch, fix one blocker, verify narrowly, push and reply]
+
+  - id: merge_gate
+    priority: 30
+    template: merge-gate.md
+    class: release
+    selector: pr_ready_for_release_gate
+    mutates: pr_review
+    when: A PR has all required persona reviews and needs a final gate.
+    compact_steps: [Check CI and quorum, verify no blockers, post MERGE_READY or BLOCKED]
+
+  - id: merge_pr
+    priority: 35
+    template: merge-pr.md
+    class: release
+    selector: pr_has_merge_ready_gate
+    mutates: pull_request_merge, issue_comment
+    when: A PR has a MERGE_READY gate and branch protection allows merge.
+    compact_steps: [Re-check ready gate, merge without bypass, post release summary]
+
+  - id: migrate_persona
+    priority: 40
+    template: migrate-persona.md
+    class: promptops
+    selector: next_missing_persona_from_roster
+    mutates: branch_commit, pull_request
+    policy: operating_model_amendment
+    when: A roster persona has no `.github/agent-prompts/<id>.md` file.
+    compact_steps: [Read contract and history, create persona prompt, validate frontmatter, open risk:high PR]
+
+  - id: implement_scenario
+    priority: 45
+    template: implement-scenario.md
+    class: promptops
+    selector: next_missing_scenario_from_catalog
+    mutates: branch_commit, pull_request
+    policy: operating_model_amendment
+    when: A simulation scenario from the scenario catalog is missing.
+    compact_steps: [Read schema and examples, write scenario YAML, validate dry-run, open risk:high PR]
+
+  - id: triage_issue
+    priority: 50
+    template: triage-issue.md
+    class: planning
+    selector: untriaged_issue
+    mutates: issue_comment, labels
+    when: An issue lacks ready-for-agent triage, risk, owner, or acceptance criteria.
+    compact_steps: [Read issue, classify risk, choose required personas dynamically, post triage]
+
+  - id: implement_issue
+    priority: 55
+    template: implement-issue.md
+    class: implementation
+    selector: ready_issue_without_pr
+    mutates: branch_commit, pull_request
+    when: A ready-for-agent issue can be implemented.
+    compact_steps: [Create issue branch, satisfy acceptance criteria, verify, open PR]
+
+  - id: prompt_improvement
+    priority: 60
+    template: prompt-improvement.md
+    class: promptops
+    selector: prompt_defect_issue
+    mutates: branch_commit, pull_request
+    policy: operating_model_amendment
+    when: A simulation failure, hallucination, or repeated review defect requires a prompt patch.
+    compact_steps: [Identify prompt weakness, patch prompt/preamble, run regression, open PR]
+
+  - id: run_prompt_regression
+    priority: 65
+    template: run-prompt-regression.md
+    class: promptops
+    selector: prompt_or_scenario_change_needs_regression
+    mutates: issue_comment, pr_review
+    when: Prompt, scenario, or regression gate changes need simulation evidence.
+    compact_steps: [Run dry-run/live mode within budget, summarize pass/fail, post evidence]
+
+  - id: run_audit
+    priority: 70
+    template: run-audit.md
+    class: audit
+    selector: audit_issue
+    mutates: issue_comment
+    when: An audit issue or periodic governance scan is selected.
+    compact_steps: [Capture snapshot, run coverage/cost/security checks, post evidence-bound report]
+
+  - id: security_audit
+    priority: 72
+    template: security-audit.md
+    class: audit
+    selector: security_issue
+    mutates: issue_comment, pr_review
+    when: A workflow, secret, auth, tenant, or prompt-injection surface needs security review.
+    compact_steps: [Enumerate trust boundaries, check bypasses, post threat model]
+
+  - id: cost_review
+    priority: 74
+    template: cost-review.md
+    class: audit
+    selector: cost_issue
+    mutates: issue_comment, pr_review
+    when: A workflow or LLM action changes cost, model routing, cadence, or caps.
+    compact_steps: [Estimate worst-case spend, check enforcement, recommend cap/model changes]
+
+  - id: comment_discussion
+    priority: 80
+    template: comment-discussion.md
+    class: discussion
+    selector: discussion_needs_persona_comment
+    mutates: discussion_comment
+    when: A Discussion needs a persona response, dissent, decision-record comment, or idea feedback.
+    compact_steps: [Refresh Discussion, draft signed response, post GraphQL comment]
+
+  - id: generate_ideas
+    priority: 82
+    template: generate-ideas.md
+    class: discussion
+    selector: idea_lab_generation_due
+    mutates: discussion
+    when: Idea Lab cadence says Nova should propose a capped batch of ideas.
+    compact_steps: [Read tiny context, de-duplicate, post exactly five ideas with kill criteria]
+
+  - id: promote_idea
+    priority: 84
+    template: promote-idea.md
+    class: discussion
+    selector: idea_lab_discussion_promotable
+    mutates: issue, discussion_comment
+    when: An Idea Lab Discussion has enough human signal and should become an Issue.
+    compact_steps: [Verify reaction gate, create feature issue, comment back on Discussion]
+
+  - id: open_followup_issue
+    priority: 90
+    template: open-followup-issue.md
+    class: planning
+    selector: followup_needed_from_review_or_audit
+    mutates: issue
+    when: A review, audit, retrospective, or condition identifies bounded follow-up work.
+    compact_steps: [Extract one follow-up, create issue, link source]
+
+  - id: decision_record
+    priority: 92
+    template: decision-record.md
+    class: governance
+    selector: risk_high_needs_decision_record
+    mutates: discussion_comment, issue_comment
+    when: A risk:high+ change requires a compact decision record or dissent log.
+    compact_steps: [State decision, alternatives, risk if wrong, rollback, post signed record]
+
+  - id: retrospective
+    priority: 94
+    template: retrospective.md
+    class: knowledge
+    selector: failed_reverted_or_stalled_work
+    mutates: issue_comment, discussion_comment
+    when: A PR fails, reverts, stalls, or repeats the same review finding.
+    compact_steps: [Identify failure mode, classify gap, recommend smallest improvement]
+
+  - id: knowledge_update
+    priority: 96
+    template: knowledge-update.md
+    class: knowledge
+    selector: durable_lesson_ready
+    mutates: branch_commit, pull_request, discussion_comment
+    when: A merged decision or repeated lesson should become durable docs/wiki knowledge.
+    compact_steps: [Extract stable lesson, patch canonical docs, link evidence]
+
+  - id: re_ratification
+    priority: 98
+    template: re-ratification.md
+    class: governance
+    selector: operating_model_reratification_window
+    mutates: issue_comment, pull_request
+    when: The 30-day operating-model re-ratification window opens.
+    compact_steps: [Compare product metrics and cost, decide re-ratify/amend/rollback]
+
+
+  - id: accept_pr
+    priority: 32
+    template: accept-pr.md
+    class: release
+    selector: pr_ready_for_acceptance_decision
+    mutates: issue_comment
+    when: A PR has all required reviews and needs an explicit ACCEPT / HOLD / REJECT decision before merge or close.
+    compact_steps: [Re-check quorum and CI, choose ACCEPT/HOLD/REJECT, post ACCEPTANCE-DECISION marker, stop]
+
+  - id: reject_pr
+    priority: 34
+    template: reject-pr.md
+    class: release
+    selector: pr_has_reject_decision
+    mutates: pull_request_close
+    when: A PR has an explicit terminal REJECT marker and should be closed without merge.
+    compact_steps: [Verify reject marker, write signed close reason, close PR, stop]
+
+  - id: create_issue
+    priority: 88
+    template: create-issue.md
+    class: planning
+    selector: explicit_create_issue_request
+    mutates: issue
+    when: A discussion, review, audit, or issue contains an explicit CREATE-ISSUE / PROMOTE-TO-ISSUE marker.
+    compact_steps: [Read source, draft one bounded issue, create needs-triage issue, stop]
+
+  - id: close_issue
+    priority: 89
+    template: close-issue.md
+    class: planning
+    selector: issue_ready_to_close
+    mutates: issue_close, issue_comment
+    when: An issue has an explicit accepted/rejected/done marker and should be closed.
+    compact_steps: [Verify terminal marker, post signed close reason, close issue, stop]
+
+  - id: create_milestone
+    priority: 86
+    template: create-milestone.md
+    class: planning
+    selector: explicit_milestone_request
+    mutates: milestone
+    when: An issue explicitly requests a new milestone.
+    compact_steps: [Check duplicates, create milestone via gh api, stop]
+
+  - id: assign_milestone
+    priority: 87
+    template: assign-milestone.md
+    class: planning
+    selector: issue_needs_existing_milestone
+    mutates: issue_edit, issue_comment
+    when: An issue lacks a requested milestone assignment.
+    compact_steps: [Verify milestone exists, edit issue milestone, post audit comment]
+
+  - id: close_milestone
+    priority: 99
+    template: close-milestone.md
+    class: planning
+    selector: milestone_has_zero_open_issues
+    mutates: milestone
+    when: A milestone is open but has zero open issues and at least one closed issue.
+    compact_steps: [Re-check milestone counts, close milestone via gh api, post Epic summary]
+
+  - id: post_status_and_exit
+    priority: 900
+    template: post-status-and-exit.md
+    class: status
+    selector: no_work_available
+    mutates: issue_comment
+    when: No other loop action is available.
+    compact_steps: [Confirm probe state, post signed no-work status]
+
+  - id: skip
+    priority: 0
+    template: skip.md
+    class: status
+    selector: open_pr_limit_saturated
+    mutates: issue_comment
+    when: The repo is intentionally saturated because too many PRs are open.
+    compact_steps: [Post signed skip reason, stop]

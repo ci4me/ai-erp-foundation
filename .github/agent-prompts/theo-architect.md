@@ -20,6 +20,23 @@ activates_on:
   - "area:database"
   - "risk:high"
   - "risk:critical"
+actions:
+  primary:
+    - review_pr
+    - decision_record
+  support:
+    - address_changes_requested
+    - implement_issue
+    - migrate_persona
+    - implement_scenario
+    - prompt_improvement
+    - re_ratification
+context_refs:
+  review_pr:
+    - docs/operating-model.md
+    - docs/amendment-policy.md
+  decision_record:
+    - docs/amendment-policy.md
 forbidden_paths:
   - ".github/agent-prompts/**"
   - ".github/workflows/**"

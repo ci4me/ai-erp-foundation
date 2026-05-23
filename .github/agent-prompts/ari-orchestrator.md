@@ -14,6 +14,27 @@ verdict_enum:
   - MERGE_READY
 activates_on:
   - "*"                            # every issue / every PR
+actions:
+  primary:
+    - triage_issue
+    - address_changes_requested
+    - migrate_persona
+    - open_followup_issue
+    - create_issue
+    - close_issue
+    - create_milestone
+    - assign_milestone
+    - decision_record
+    - post_status_and_exit
+    - skip
+  support:
+    - review_pr
+    - merge_gate
+context_refs:
+  review_pr:
+    - docs/operating-model.md
+  triage_issue:
+    - docs/friction-budget.md
 forbidden_paths:
   - ".github/agent-prompts/**"
   - ".github/workflows/**"

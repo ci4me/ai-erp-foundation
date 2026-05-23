@@ -16,6 +16,20 @@ verdict_enum:
   - ABSTAIN
 activates_on:
   - "*"  # every PR with code change
+actions:
+  primary:
+    - review_pr
+    - run_prompt_regression
+    - implement_scenario
+  support:
+    - address_changes_requested
+    - implement_issue
+    - prompt_improvement
+context_refs:
+  review_pr:
+    - simulation/README.md
+  run_prompt_regression:
+    - simulation/README.md
 forbidden_paths:
   - ".github/agent-prompts/**"
   - ".github/workflows/**"

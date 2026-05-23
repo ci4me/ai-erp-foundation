@@ -18,6 +18,24 @@ verdict_enum:
   - ABSTAIN
 activates_on:
   - "*"  # every PR — Vera labels first, others follow
+actions:
+  primary:
+    - review_pr
+    - triage_issue
+    - run_audit
+    - decision_record
+    - re_ratification
+  support:
+    - merge_gate
+    - security_audit
+    - promote_idea
+context_refs:
+  review_pr:
+    - docs/amendment-policy.md
+    - docs/friction-budget.md
+  re_ratification:
+    - docs/amendment-policy.md
+    - docs/product-vision.md
 forbidden_paths:
   - ".github/agent-prompts/**"
   - ".github/workflows/**"

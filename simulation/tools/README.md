@@ -13,6 +13,7 @@ tooling."
 | [`coverage_matrix.py`](./coverage_matrix.py) | Aggregates `simulation/scorecards/*.json` into a persona × scenario matrix; identifies dead personas + flaw-detection MVPs | Markdown table + JSON | Drives Cora's redundancy audit with real data instead of projections. |
 | [`arch_snapshot.py`](./arch_snapshot.py) | Captures full GitHub repo state (PRs, issues, discussions, milestones, labels, persona files, scenarios) into a JSON snapshot; diffs against a previous snapshot to show framework evolution | JSON snapshot + Markdown diff | Single-pane view. Run weekly via cron for a framework-velocity dashboard. |
 | [`meta_sage.py`](./meta_sage.py) | Self-critique persona. Reads operating model + persona prompts + recent activity, dispatches Claude with a brutal-honesty system prompt, produces critique Markdown | Markdown to stdout | The framework reviewing itself. Run after major changes. |
+| [`validate_agent_action.py`](./validate_agent_action.py) | Validates agent-created PR reviews, discussion comments, acceptance decisions, issue close comments, and summaries against repo-owned templates | Exit code + JSON/text report | Used by action templates and `.github/workflows/agent-action-validator.yml` to stop malformed autonomous actions. |
 
 ## Usage patterns
 
@@ -67,3 +68,12 @@ Costs ~$0.50–$2 per run depending on context size.
   which reads persona files to discover what exists.
 - **Graceful when empty.** If scorecards / snapshots / personas haven't
   been generated yet, tools degrade to "no data yet" instead of erroring.
+
+
+### "Did the agent action follow the template?"
+
+```bash
+python -m simulation.tools.validate_agent_action --kind auto --file /tmp/body.md --json
+```
+
+This checks the signed persona header, required sections, machine-readable lifecycle markers, persona verdict enum, and unresolved placeholders before the action is posted or by GitHub Actions after it is posted.

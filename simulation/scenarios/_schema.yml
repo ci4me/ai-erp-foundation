@@ -57,7 +57,7 @@ properties:
         enum: [risk:low, risk:medium, risk:high, risk:critical]
   planted_flaws:
     type: array
-    minItems: 1
+    minItems: 0
     items:
       type: object
       required: [id, name, severity]

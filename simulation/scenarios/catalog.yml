@@ -1,0 +1,8 @@
+version: 0.1.0
+description: Canonical simulation scenario backlog for the autonomous loop.
+scenarios:
+  - 001-suspend-cookie
+  - 002-docs-only
+  - 003-critical-migration
+  - 004-hallucination-trap
+  - 005-prior-approval-conflict

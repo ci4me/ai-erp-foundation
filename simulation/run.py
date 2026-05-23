@@ -73,7 +73,7 @@ def load_schema() -> dict[str, Any]:
 
 def discover_scenarios() -> list[Path]:
     """Return every YAML scenario file (excluding the schema itself)."""
-    return sorted(p for p in SCENARIOS_DIR.glob("*.yml") if p.name != "_schema.yml")
+    return sorted(p for p in SCENARIOS_DIR.glob("*.yml") if p.name not in {"_schema.yml", "catalog.yml"})
 
 
 def discover_personas() -> set[str]:

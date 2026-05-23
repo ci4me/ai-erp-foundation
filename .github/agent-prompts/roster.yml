@@ -1,0 +1,36 @@
+version: 0.1.0
+description: Canonical persona backlog. Capability assignments live inside each persona prompt frontmatter.
+personas:
+  - ari-orchestrator
+  - mara-product-owner
+  - nico-program-manager
+  - vera-risk-officer
+  - theo-architect
+  - lina-implementer
+  - dario-database
+  - nova-api-contract
+  - sofia-frontend-ux
+  - kai-devops
+  - pax-performance
+  - eve-domain-events
+  - vale-value-objects
+  - hex-boundaries
+  - quinn-query-read-model
+  - bus-middleware
+  - saga-process-manager
+  - iris-security
+  - omar-audit
+  - tessa-test-lead
+  - rhea-release-manager
+  - lex-phpstan
+  - pico-phpcs
+  - deck-deptrac
+  - doc-docblocks
+  - cliff-coverage
+  - mocha-test-doubles
+  - milo-memory-librarian
+  - june-documentation-curator
+  - echo-retrospective
+  - prism-promptops
+  - cora-cost-architect
+  - nova-idea-generator

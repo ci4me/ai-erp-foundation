@@ -1,0 +1,45 @@
+version: 0.1.0
+operating_model_paths:
+  - ".github/agent-prompts/**"
+  - ".github/workflows/**"
+  - "docs/operating-model.md"
+  - "docs/amendment-policy.md"
+  - "docs/friction-budget.md"
+  - "simulation/**"
+operating_model_amendment:
+  minimum_risk: risk:high
+  required_labels: [risk:high, area:agent-governance]
+  required_human_phrase: approved for operating-model amendment per docs/amendment-policy.md
+  reviewer_rules:
+    - when_paths: ["*"]
+      reviewers: [theo-architect, vera-risk-officer, rhea-release-manager]
+    - when_paths: [".github/agent-prompts/**"]
+      reviewers: [prism-promptops]
+    - when_paths: [".github/workflows/**"]
+      reviewers: [iris-security]
+    - when_paths: ["simulation/**"]
+      reviewers: [prism-promptops, tessa-test-lead]
+  policy_refs:
+    - docs/amendment-policy.md
+    - docs/friction-budget.md
+
+discussion_lifecycle:
+  needs_comment_markers:
+    - "NEEDS-COMMENT:"
+    - "NEEDS-PERSONA:"
+    - "QUESTION-FOR-PERSONA:"
+  terminal_markers:
+    - "DISCUSSION-STATE: RESOLVED"
+    - "DISCUSSION-STATE: PROMOTED"
+    - "DISCUSSION-STATE: DEFERRED"
+    - "DISCUSSION-STATE: CLOSED"
+    - "DECISION-RECORDED:"
+  do_not_comment_when:
+    - A terminal marker exists in the discussion body or comments.
+    - The selected persona already posted a signed response and no new NEEDS-PERSONA marker mentions them after that response.
+    - The discussion only needs a GitHub reaction/vote and no comment marker exists.
+  validation_required:
+    - Signed YAML persona header.
+    - Explicit Discussion state marker.
+    - One concrete next action or explicit no-action-needed.
+    - No unresolved placeholders.

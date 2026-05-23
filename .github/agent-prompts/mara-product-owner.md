@@ -17,6 +17,25 @@ verdict_enum:
   - ABSTAIN
 activates_on:
   - "*"  # every feature work, every risk:high+
+actions:
+  primary:
+    - review_pr
+    - triage_issue
+    - comment_discussion
+    - promote_idea
+    - open_followup_issue
+    - create_issue
+    - close_issue
+    - assign_milestone
+  support:
+    - re_ratification
+    - retrospective
+context_refs:
+  review_pr:
+    - docs/product-vision.md
+    - docs/friction-budget.md
+  promote_idea:
+    - docs/idea-lab.md
 forbidden_paths:
   - ".github/agent-prompts/**"
   - ".github/workflows/**"
