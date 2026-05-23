@@ -21,6 +21,13 @@ description: Non-negotiable autonomous-loop limits shared by every action
 - Never convert a discussion/comment into an Issue unless the selected action is `create_issue` or `promote_idea` and the source contains `CREATE-ISSUE:` or `PROMOTE-TO-ISSUE:`.
 - **Prompt caching**: the rendered prompt prefix is delimited by `<!-- CACHE -->` so SDK callers can mark everything above it as `cache_control: ephemeral`. Do not move the sentinel.
 
+## Marker discipline (NON-NEGOTIABLE)
+
+- **Never post a comment, review, or discussion reply without a marker.** The autonomous loop's selectors and `simulation.tools.validator` are blind to prose-only output; an un-markered comment is treated as "no signal".
+- Use the marker declared by the action schema in `.github/action-templates/schemas/<action>.schema.yaml` when one applies.
+- If you are unsure which marker is correct, end your output with `CLARIFICATION-REQUEST: POSTED` and ask in the body — that surfaces the ambiguity instead of dropping it.
+- Issues/PRs/discussions arrive un-markered when humans open them by hand. The `scripts/inject_markers_everywhere.sh` one-shot repair walks the repo and adds default markers (`TEAM-REQUEST:`, `REVIEW-REQUEST:`, `PLAN-REQUEST:`); run it after a fresh fork or after a long human-only stretch.
+
 ## Action Chaining Limits
 
 - Max chain length: 3 actions per iteration.
