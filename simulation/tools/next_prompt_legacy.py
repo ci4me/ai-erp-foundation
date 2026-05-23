@@ -2243,6 +2243,15 @@ def main() -> int:
         action="store_true",
         help="Validate templates, policies, roster, personas, and action ids without gh.",
     )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=1,
+        help=(
+            "Render N consecutive ticks (chaining via CHAIN-NEXT honored). "
+            "Default 1 keeps the historic single-prompt behavior."
+        ),
+    )
     args = parser.parse_args()
 
     if args.validate_config:
@@ -2285,6 +2294,33 @@ def main() -> int:
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
+
+    if args.max_iterations > 1:
+        # Multi-iteration mode renders N consecutive prompts. Real chaining
+        # (CHAIN-NEXT) is realised at the *agent* layer because this CLI
+        # only writes prompts; the wrapper that follows CHAIN-NEXT inline
+        # is simulation.tools.loop_runner.run_iterations.
+        base = args.output or Path("/tmp/next_prompt_iter.md")
+        base.parent.mkdir(parents=True, exist_ok=True)
+        first = base.with_suffix(".1.md") if base.suffix else base.with_name(base.name + ".1")
+        first.write_text(prompt)
+        print(
+            f"iteration 1/{args.max_iterations} rendered to {first}. "
+            f"For each subsequent iteration the agent should execute the action, "
+            f"check the posted body for CHAIN-NEXT, and re-invoke this CLI."
+        )
+        for i in range(2, args.max_iterations + 1):
+            state = gather_repo_state(args.repo)
+            priority, context = resolve_priority(state, args.repo)
+            prompt = render_prompt(
+                args.repo, priority, context, state,
+                max_diff_chars=args.max_diff_chars,
+                post_mode=args.post_mode,
+            )
+            out = base.with_suffix(f".{i}.md") if base.suffix else base.with_name(f"{base.name}.{i}")
+            out.write_text(prompt)
+            print(f"iteration {i}/{args.max_iterations} rendered to {out}")
+        return 0
 
     if args.output:
         args.output.write_text(prompt)

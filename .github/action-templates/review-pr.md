@@ -271,6 +271,19 @@ fi
 
 Do not select the next reviewer yourself. The next session must run `next_prompt.py` again against GitHub state after your comments exist.
 
+## Auto-approval conditions (trivial PRs)
+
+- If the PR fixes an issue labelled `trivial` or `quick-fix` AND the
+  diff is ≤ 20 lines AND all CI checks are green, you MAY emit
+  `REVIEW-VERDICT: APPROVE` without waiting for a second reviewer.
+- Always include a `RATIONALE:` line of ≥ 10 words explaining why
+  the auto-approval is safe (e.g. "single typo fix, no logic change,
+  unit tests cover the touched function").
+- Auto-approval is *forbidden* when the PR touches paths under
+  `.github/agent-prompts/`, `.github/action-templates/`,
+  `.github/workflows/`, or `docs/operating-model.md` — those are
+  operating-model amendments and require the policy quorum.
+
 ## Optional Chaining
 
 When the verdict is `APPROVE` and no policy review is missing, the

@@ -41,6 +41,13 @@ actions:
     mutates: pull_request_merge, issue_comment
     when: A PR has a MERGE_READY gate and branch protection allows merge.
     compact_steps: [Re-check ready gate, merge without bypass, post release summary]
+    # quorum_required is the number of distinct APPROVE reviews needed
+    # before merge_pr is allowed to fire. trivial issues only need 1;
+    # normal work needs 2 (deliberation.REQUIRED_DISTINCT_APPROVALS).
+    quorum_required:
+      default: 2
+      trivial: 1
+      "quick-fix": 1
 
   - id: migrate_persona
     priority: 40
