@@ -344,6 +344,160 @@ def run_tick(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Chained-action loop.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class IterationRecord:
+    """Outcome of one logical iteration, which may include chained actions."""
+
+    iteration: int
+    chain_length: int
+    actions: list[str]
+    posted_urls: list[str]
+    validation_failed_at: str | None = None
+    chain_broken_reason: str = ""
+
+
+def run_iterations(
+    *,
+    repo: str,
+    select_next_action: Callable[[], tuple[str, dict[str, Any], int | None]],
+    fetch_issue: Callable[[int | None], dict[str, Any]],
+    execute_action: ActionCallback,
+    post_to_github: PostCallback,
+    max_iterations: int = 45,
+    max_chain: int | None = None,
+    open_prs_provider: Callable[[], Iterable[dict[str, Any]]] | None = None,
+    gh_get_pr: post_action_verify.GhGetPr | None = None,
+    gh_get_issue: post_action_verify.GhGetIssue | None = None,
+    lock_runner: lock_mod.GhRunner | None = None,
+) -> list[IterationRecord]:
+    """Drive up to ``max_iterations`` logical ticks with action chaining.
+
+    The loop performs one round-trip to the LLM per iteration in the no-chain
+    case. When the agent ends its output with ``CHAIN-NEXT: <action>``, the
+    runner re-uses the in-memory issue and runs the next action *without*
+    re-fetching GitHub state. Up to :data:`loop_speedup.MAX_CHAIN` (default
+    3) chained actions per iteration are allowed; the chain breaks when:
+
+    - the cap is reached,
+    - the chained action id is not in
+      :data:`loop_speedup.ALLOWED_CHAIN_ACTIONS`,
+    - validation fails (a guard inside ``run_tick`` raised),
+    - the agent emits no further ``CHAIN-NEXT`` marker.
+
+    The returned list of :class:`IterationRecord` summarises each iteration
+    with its chain length and posted URLs, suitable for the iteration log.
+    """
+    # Lazy import to avoid a hard dependency cycle through validator.
+    from simulation.tools import loop_speedup
+    from simulation.tools import validator as _validator
+
+    chain_cap = max_chain or loop_speedup.MAX_CHAIN
+    records: list[IterationRecord] = []
+    posted_urls_buffer: list[str] = []
+
+    def _post(target: str, body: str) -> None:
+        # Wrap the caller-supplied post callback to capture URLs returned by
+        # gh, when the callback returns a string we treat it as a URL.
+        result = post_to_github(target, body)
+        if isinstance(result, str) and result.startswith("http"):
+            posted_urls_buffer.append(result)
+
+    for iteration in range(1, max_iterations + 1):
+        try:
+            action, context, target_number = select_next_action()
+        except StopIteration:
+            logger.info("no more actions", extra={"iteration": iteration})
+            break
+
+        issue = fetch_issue(target_number) if target_number is not None else {}
+        chain_length = 0
+        actions_run: list[str] = []
+        posted_urls_buffer.clear()
+        record = IterationRecord(
+            iteration=iteration,
+            chain_length=0,
+            actions=actions_run,
+            posted_urls=[],
+        )
+
+        current_action = action
+        current_pr = (context or {}).get("pr_number")
+
+        while True:
+            logger.info(
+                "executing action",
+                extra={
+                    "iteration": iteration,
+                    "chain_length": chain_length,
+                    "action": current_action,
+                },
+            )
+            outcome = run_tick(
+                repo=repo,
+                issue=issue,
+                proposed_action=current_action,
+                proposed_pr_number=current_pr,
+                open_prs=list(open_prs_provider() if open_prs_provider else []),
+                execute_action=execute_action,
+                post_to_github=_post,
+                gh_get_pr=gh_get_pr,
+                gh_get_issue=gh_get_issue,
+                lock_runner=lock_runner,
+            )
+            actions_run.append(current_action)
+
+            if outcome.aborted or (outcome.validation and not outcome.validation.valid):
+                record.validation_failed_at = current_action
+                record.chain_broken_reason = outcome.reason or "validation_failed"
+                break
+
+            # Peek at the body the agent produced for a CHAIN-NEXT marker.
+            posted_body = ""
+            if outcome.validation and outcome.validation.parse_result:
+                posted_body = "\n".join(
+                    f"{hit.marker}: {hit.value}" for hit in outcome.validation.parse_result.hits
+                )
+            posted_body = posted_body + "\n" + ("\n".join(posted_urls_buffer))
+            next_action = _validator.extract_chain_next(posted_body)
+
+            if not next_action:
+                break
+            if chain_length + 1 >= chain_cap:
+                record.chain_broken_reason = f"chain limit {chain_cap} reached"
+                break
+            plan = loop_speedup.evaluate_chain(
+                f"CHAIN-NEXT: {next_action}",
+                chain_so_far=chain_length,
+                max_chain=chain_cap,
+            )
+            if plan.next_action is None:
+                record.chain_broken_reason = plan.rejected_reason or "chain rejected"
+                break
+
+            chain_length += 1
+            current_action = plan.next_action
+
+        record.chain_length = chain_length
+        record.posted_urls = list(posted_urls_buffer)
+        records.append(record)
+        logger.info(
+            "iteration complete",
+            extra={
+                "iteration": iteration,
+                "chain_length": chain_length,
+                "actions": actions_run,
+                "posted_urls": record.posted_urls,
+            },
+        )
+
+    return records
+
+
 def call_gh_safely(callback: Callable[[], Any], *, exit_code: int = 75) -> Any:
     """Run ``callback`` and translate API errors into a clean exit.
 
@@ -359,6 +513,7 @@ def call_gh_safely(callback: Callable[[], Any], *, exit_code: int = 75) -> Any:
 
 
 __all__ = [
+    "IterationRecord",
     "MAX_VALIDATION_RETRIES",
     "RETRY_LABEL_PREFIX",
     "TickOutcome",
@@ -366,5 +521,6 @@ __all__ = [
     "call_gh_safely",
     "configure_logging",
     "retry_count_from_labels",
+    "run_iterations",
     "run_tick",
 ]

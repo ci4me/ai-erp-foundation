@@ -270,3 +270,15 @@ fi
 ### Step 8: Stop
 
 Do not select the next reviewer yourself. The next session must run `next_prompt.py` again against GitHub state after your comments exist.
+
+## Optional Chaining
+
+When the verdict is `APPROVE` and no policy review is missing, the
+review may end with:
+
+```
+CHAIN-NEXT: merge_pr
+```
+
+so the merge action runs inline. Do not chain after `REQUEST_CHANGES` or
+`BLOCKED` — the author has to push first.

@@ -33,3 +33,17 @@ git push -u origin "issue-{{issue_number}}-[short-slug]"
 ```
 
 Open the PR with `risk:*` labels required by policy, never weaker than `risk:high` if operating-model paths are touched.
+
+## Optional Chaining
+
+When the implementation is small and the next step is mechanical, end the
+output with a chain marker so the loop runs the next action without a
+fresh GitHub fetch:
+
+```
+CHAIN-NEXT: review_pr
+```
+
+Allowed next actions in the chain: `review_pr`, `merge_pr`, `close_issue`,
+`request_clarification`. Do **not** chain `triage_issue` or
+`design_solution` — those need a fresh state read.
