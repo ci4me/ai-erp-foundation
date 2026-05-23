@@ -1,0 +1,8 @@
+action: validate_plan
+required_markers:
+  - marker: "PLAN-STATUS"
+    allowed_values: [DRAFT, APPROVED, IMPLEMENTING, DONE, REJECTED]
+required_sections:
+  - heading: "Validation rules"
+    min_length: 20
+post_action_checks: []

@@ -411,6 +411,17 @@ def validate_action_output(
                 f"marker `{marker}:` has value {actual} but allowed values are {{{'|'.join(allowed)}}}"
             )
 
+    # AC enforcement for the planning workflow's implementer step.
+    if action_name == "implement_with_ac" and issue_context:
+        ok, missing_acs = validate_acceptance_criteria(
+            issue_context.get("body") or "", output_text
+        )
+        if not ok:
+            missing.append(
+                "implementation does not reference acceptance criteria: "
+                + ", ".join(missing_acs)
+            )
+
     required_sections = schema.get("required_sections") or []
     sections = _extract_sections(output_text)
     for entry in required_sections:
@@ -454,6 +465,25 @@ def extract_markers(body: str) -> list[MarkerHit]:
     list of hits and not the unknown/invalid/warnings sidebar.
     """
     return list(parse_body(body).hits)
+
+
+_AC_LINE_RE = re.compile(r"^-\s*\[[\sx]\]\s*(AC\d+):\s*(.*)$", re.MULTILINE | re.IGNORECASE)
+
+
+def validate_acceptance_criteria(issue_body: str, agent_output: str) -> tuple[bool, list[str]]:
+    """Check that ``agent_output`` mentions every AC listed in ``issue_body``.
+
+    An AC line in the issue body looks like ``- [ ] AC1: …``. The
+    implementer must reference each AC id (``AC1``, ``AC2``…) somewhere
+    in their output, or quote the AC text verbatim. Returns
+    ``(all_present, missing_ids)``.
+    """
+    ac_lines = _AC_LINE_RE.findall(issue_body or "")
+    missing: list[str] = []
+    for ac_id, ac_text in ac_lines:
+        if ac_id.lower() not in agent_output.lower() and (ac_text and ac_text.lower() not in agent_output.lower()):
+            missing.append(ac_id)
+    return not missing, missing
 
 
 _CHAIN_NEXT_RE = re.compile(r"^CHAIN-NEXT:\s*(?P<action>[a-z][a-z0-9_]+)\s*$", re.MULTILINE | re.IGNORECASE)

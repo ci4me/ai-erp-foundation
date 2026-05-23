@@ -324,3 +324,57 @@ actions:
     mutates: issue_close, issue_comment
     when: A scheduled sweep finds inconsistencies between PR, issue, and marker state.
     compact_steps: [Sweep merged PRs vs open issues, sweep DONE markers vs state, close orphans, post CONSISTENCY-CHECK marker]
+
+  - id: facilitate_planning
+    priority: 95
+    template: facilitate_planning.md
+    class: planning
+    selector: discussion_with_plan_request_no_summary
+    mutates: discussion_comment
+    when: "A Discussion contains PLAN-REQUEST: and no PLAN-SUMMARY yet."
+    compact_steps: [Ask 3+ clarifying questions, summarise as PLAN-SUMMARY, signal PLAN-READY]
+
+  - id: promote_to_issues
+    priority: 90
+    template: promote_to_issues.md
+    class: planning
+    selector: discussion_plan_ready_no_promotion
+    mutates: milestone, issue, project_card
+    when: Discussion has PLAN-READY and no PROMOTION-COMPLETE.
+    compact_steps: [Create milestone, create issues per work-unit, attach to Project, post PROMOTION-COMPLETE]
+
+  - id: validate_plan
+    priority: 85
+    template: validate_plan.md
+    class: planning
+    selector: plan_issue_draft_with_human_approve
+    mutates: issue_comment, labels
+    when: "An issue with PLAN-STATUS: DRAFT receives a PLAN-APPROVE comment."
+    compact_steps: [Check AC count, check testability, check TEST-STRATEGY, post PLAN-STATUS: APPROVED or DRAFT]
+
+  - id: implement_with_ac
+    priority: 100
+    template: implement_with_ac.md
+    class: implementation
+    selector: plan_issue_approved
+    mutates: branch_commit, pull_request, issue_comment
+    when: "An issue has PLAN-STATUS: APPROVED."
+    compact_steps: [Read each AC, write AC coverage section, open PR, post AC-COVERAGE]
+
+  - id: verify_implementation
+    priority: 70
+    template: verify_implementation.md
+    class: audit
+    selector: plan_issue_pr_merged
+    mutates: issue_comment, issue_close
+    when: "A PR linked to a PLAN-STATUS: IMPLEMENTING issue was merged."
+    compact_steps: [Fetch issue ACs, verify each, post AC-DONE and PLAN-STATUS: DONE]
+
+  - id: close_plan
+    priority: 60
+    template: close_plan.md
+    class: governance
+    selector: milestone_all_plan_issues_done
+    mutates: milestone, discussion_comment
+    when: All issues in a plan milestone are DONE and the milestone is ready to close.
+    compact_steps: [Close milestone, post RELEASE-NOTES, store retrospective lesson]

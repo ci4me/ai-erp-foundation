@@ -273,5 +273,47 @@ markers:
     terminal: false
     meaning: Outcome of the cross-state consistency sweep.
 
+  facilitate_planning:
+    marker: PLAN-READY
+    values: [POSTED, BLOCKED]
+    regex: '(?im)^PLAN-READY:\s*(POSTED|BLOCKED)\b'
+    terminal: false
+    meaning: Facilitated discussion is ready to be promoted to issues.
+
+  promote_to_issues:
+    marker: PROMOTION-COMPLETE
+    values: [POSTED, BLOCKED]
+    regex: '(?im)^PROMOTION-COMPLETE:\s*(POSTED|BLOCKED)\b'
+    terminal: false
+    meaning: Plan was promoted to milestone + issues + (optional) project card.
+
+  validate_plan:
+    marker: PLAN-STATUS
+    values: [DRAFT, APPROVED, IMPLEMENTING, DONE, REJECTED]
+    regex: '(?im)^PLAN-STATUS:\s*(DRAFT|APPROVED|IMPLEMENTING|DONE|REJECTED)\b'
+    terminal: false
+    meaning: Plan lifecycle gate decision posted on the plan issue.
+
+  implement_with_ac:
+    marker: AC-COVERAGE
+    values: [POSTED, BLOCKED]
+    regex: '(?im)^AC-COVERAGE:\s*(POSTED|BLOCKED)\b'
+    terminal: false
+    meaning: Implementer documented coverage for every AC and opened a PR.
+
+  verify_implementation:
+    marker: AC-DONE
+    values: [ALL, PARTIAL, FAILED]
+    regex: '(?im)^AC-DONE:\s*(ALL|PARTIAL|FAILED)\b'
+    terminal: false
+    meaning: Post-merge AC verification result.
+
+  close_plan:
+    marker: RELEASE-NOTES
+    values: [POSTED, BLOCKED]
+    regex: '(?im)^RELEASE-NOTES:\s*(POSTED|BLOCKED)\b'
+    terminal: true
+    meaning: "Final close of a plan: milestone closed, release notes posted."
+
   # CHAIN-NEXT is intentionally not registered — it has no catalog action;
   # see simulation/tools/loop_speedup.parse_chain_next for the parser.
