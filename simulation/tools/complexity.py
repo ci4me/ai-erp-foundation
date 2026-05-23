@@ -84,4 +84,33 @@ def detect_complexity(issue_body: str, labels: list[str] | tuple[str, ...]) -> d
     return _LEVELS["medium"].as_dict()
 
 
-__all__ = ["COMPLEX_KEYWORDS", "Complexity", "detect_complexity"]
+def get_cot_requirements(issue: dict) -> dict:
+    """Return the per-issue CoT contract, including the ``require_cot`` flag.
+
+    Mirrors :func:`simulation.tools.loop_speedup.cot_requirements` so
+    callers that already imported :mod:`complexity` don't have to reach
+    into a sibling module. ``trivial`` / ``quick-fix`` labels set
+    ``require_cot=False`` (and 1 step × 3 words); ``complex``,
+    ``risk:high``, ``risk:critical`` demand the full 5 × 12; otherwise
+    the medium default (3 × 8) applies.
+    """
+    labels: list[str] = []
+    raw_labels = issue.get("labels") if isinstance(issue, dict) else []
+    for entry in raw_labels or []:
+        if isinstance(entry, dict):
+            name = entry.get("name") or ""
+        else:
+            name = str(entry)
+        if name:
+            labels.append(name)
+    body = (issue.get("body") if isinstance(issue, dict) else "") or ""
+    spec = detect_complexity(body, labels)
+    label_set = {label.lower() for label in labels}
+    if "trivial" in label_set or "quick-fix" in label_set:
+        return {"min_steps": 1, "min_words_per_step": 3, "require_cot": False}
+    if "complex" in label_set or "risk:high" in label_set or "risk:critical" in label_set:
+        return {"min_steps": 5, "min_words_per_step": 12, "require_cot": True}
+    return {**spec, "require_cot": True}
+
+
+__all__ = ["COMPLEX_KEYWORDS", "Complexity", "detect_complexity", "get_cot_requirements"]
