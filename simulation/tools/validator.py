@@ -368,11 +368,15 @@ def validate_action_output(
     # Status-only actions and callers without context are skipped — the
     # latter keeps older tests/scripts that pre-date CoT working.
     if action_name not in {"post_status_and_exit", "skip"} and issue_context:
+        from simulation.tools import loop_speedup  # lazy to avoid cycle
+
         ctx = issue_context
         labels = [label.get("name", "") for label in ctx.get("labels") or []]
-        cot_ok, cot_msg = validate_cot(output_text, ctx.get("body") or "", labels)
-        if not cot_ok:
-            missing.append(cot_msg)
+        spec = loop_speedup.cot_requirements({"body": ctx.get("body") or "", "labels": ctx.get("labels") or []})
+        if spec.get(loop_speedup.REQUIRE_COT_KEY, True):
+            cot_ok, cot_msg = validate_cot(output_text, ctx.get("body") or "", labels)
+            if not cot_ok:
+                missing.append(cot_msg)
 
     required_markers = schema.get("required_markers") or []
     for entry in required_markers:

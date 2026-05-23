@@ -1,0 +1,6 @@
+action: post_status_and_exit
+required_markers:
+  - marker: "LOOP-STATUS"
+    allowed_values: [NO_WORK, BLOCKED]
+required_sections: []
+post_action_checks: []

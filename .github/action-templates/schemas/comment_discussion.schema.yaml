@@ -1,0 +1,8 @@
+action: comment_discussion
+required_markers:
+  - marker: "DISCUSSION-STATE"
+    allowed_values: [OPEN, RESOLVED, PROMOTED, DEFERRED, CLOSED]
+required_sections:
+  - heading: "Discussion state"
+    min_length: 10
+post_action_checks: []
