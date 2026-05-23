@@ -72,8 +72,9 @@ def load_schema() -> dict[str, Any]:
 
 
 def discover_scenarios() -> list[Path]:
-    """Return every YAML scenario file (excluding the schema itself)."""
-    return sorted(p for p in SCENARIOS_DIR.glob("*.yml") if p.name not in {"_schema.yml", "catalog.yml"})
+    """Return scenario YAML files, excluding schema/catalog helper files."""
+    excluded = {"_schema.yml", "catalog.yml"}
+    return sorted(p for p in SCENARIOS_DIR.glob("*.yml") if p.name not in excluded)
 
 
 def discover_personas() -> set[str]:
@@ -141,9 +142,10 @@ def run_live(scenarios: list[Path], schema: dict[str, Any], personas: set[str]) 
     validates structure (delegates to ``run_dry``) so CI is green and the API
     surface is reviewable.
     """
-    structure_results = run_dry(scenarios, schema, personas)
-    if any(not r.passed for r in structure_results):
-        return structure_results  # don't waste API tokens on broken scenarios
+    # Validate first so live-mode callers see structural failures during manual
+    # testing, but keep the explicit shim contract: this function must not
+    # silently return as though live dispatch happened until the SDK wiring lands.
+    run_dry(scenarios, schema, personas)
     raise NotImplementedError(
         "Live mode is not yet wired in this PR. Implementation tracked in sub-issue "
         "follow-up to #9 (Theme F). The Anthropic SDK call site, prompt assembly, "

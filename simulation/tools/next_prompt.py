@@ -35,9 +35,8 @@ import shutil
 import subprocess
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -73,20 +72,24 @@ class RepoState:
     open_prs: list[dict[str, Any]]
     open_issues: list[dict[str, Any]]
     open_discussions: list[dict[str, Any]]
-    open_milestones: list[dict[str, Any]]
     existing_personas: set[str]
     existing_scenarios: set[str]
     prs_with_changes_requested: list[dict[str, Any]]
+    open_milestones: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _gh(args: list[str], repo: str) -> str:
-    """Run gh when available; otherwise read public GitHub state with Python REST.
+    """Run `gh` when available, otherwise use a stdlib GitHub REST bridge.
 
-    The autonomous loop must work in sandboxed environments where `gh` is not
-    installed or cannot authenticate. For read-only discovery, this function
-    emulates the small subset of `gh` commands used by this module through the
-    GitHub REST API. A `GITHUB_TOKEN` environment variable is optional for higher
-    rate limits and required only for the Discussions GraphQL fallback.
+    The autonomous loop is often executed from restricted sandboxes: ChatGPT,
+    Codex, CI jobs, or local terminals that may not have `gh` installed. This
+    adapter keeps the rest of the scheduler honest by preserving the tiny subset
+    of `gh` command shapes that `next_prompt.py` uses, while falling back to
+    public GitHub REST/GraphQL calls for read-only discovery.
+
+    Write operations are intentionally not emulated here. Action templates render
+    real `gh` mutation commands for the *agent* to run after validation; this
+    function only reads state so the next action can be selected safely.
     """
     command = ["gh", *args]
     if args and args[0] != "api":
@@ -123,12 +126,15 @@ def _github_api_json(
     data: dict[str, Any] | None = None,
     accept: str = "application/vnd.github+json",
 ) -> Any:
-    """Call GitHub's REST/GraphQL API with stdlib only."""
+    """Call GitHub REST/GraphQL with Python stdlib only.
+
+    `repo` is accepted for logging and future host routing; `path` may be either
+    a full `https://api.github.com/...` URL or an API-relative path such as
+    `repos/owner/name/pulls`.
+    """
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     url = path if path.startswith("https://") else f"https://api.github.com/{path.lstrip('/')}"
-    body = None
-    if data is not None:
-        body = json.dumps(data).encode("utf-8")
+    body = json.dumps(data).encode("utf-8") if data is not None else None
     request = urllib.request.Request(url, data=body, method=method)
     request.add_header("Accept", accept)
     request.add_header("X-GitHub-Api-Version", "2022-11-28")
@@ -141,18 +147,17 @@ def _github_api_json(
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             raw = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
+    except urllib.error.HTTPError as exc:  # pragma: no cover - network shaped
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"GitHub API {exc.code} for {url}: {detail}") from exc
-    except urllib.error.URLError as exc:
+    except urllib.error.URLError as exc:  # pragma: no cover - network shaped
         raise RuntimeError(f"GitHub API failed for {url}: {exc.reason}") from exc
 
-    if not raw.strip():
-        return None
-    return json.loads(raw)
+    return json.loads(raw) if raw.strip() else None
 
 
 def _github_url_text(url: str, *, accept: str = "text/plain") -> str:
+    """Fetch a text URL from GitHub using optional `GITHUB_TOKEN` auth."""
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     request = urllib.request.Request(url)
     request.add_header("Accept", accept)
@@ -162,15 +167,15 @@ def _github_url_text(url: str, *, accept: str = "text/plain") -> str:
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             return response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
+    except urllib.error.HTTPError as exc:  # pragma: no cover - network shaped
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"GitHub text fetch {exc.code} for {url}: {detail}") from exc
-    except urllib.error.URLError as exc:
+    except urllib.error.URLError as exc:  # pragma: no cover - network shaped
         raise RuntimeError(f"GitHub text fetch failed for {url}: {exc.reason}") from exc
 
 
 def _gh_rest_fallback(args: list[str], repo: str) -> str | None:
-    """Emulate the read-only gh commands used by this tool."""
+    """Emulate the read-only `gh` commands used by this tool."""
     if not args:
         return None
     try:
@@ -184,7 +189,7 @@ def _gh_rest_fallback(args: list[str], repo: str) -> str | None:
             return _github_url_text(f"https://github.com/{repo}/pull/{int(args[2])}.diff")
         if args[:2] == ["issue", "view"] and len(args) >= 3:
             return json.dumps(_rest_issue_view(repo, int(args[2])))
-        if args[0] == "api" and len(args) >= 2:
+        if args and args[0] == "api" and len(args) >= 2:
             return _rest_api_command(repo, args[1:])
     except (ValueError, json.JSONDecodeError):
         return None
@@ -192,11 +197,15 @@ def _gh_rest_fallback(args: list[str], repo: str) -> str | None:
 
 
 def _rest_api_command(repo: str, args: list[str]) -> str | None:
+    """Support `gh api ...` calls used by the scheduler."""
     if not args:
         return None
     if args[0] == "graphql":
         token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
         if not token:
+            # Public REST can read most state, but GitHub Discussions GraphQL is
+            # token-gated. Empty discussions are safer than failing the whole
+            # loop in unauthenticated public-read mode.
             return json.dumps({"data": {"repository": {"discussions": {"nodes": []}}}})
         fields: dict[str, str] = {}
         index = 1
@@ -217,6 +226,7 @@ def _rest_api_command(repo: str, args: list[str]) -> str | None:
 
 
 def _rest_list_open_prs(repo: str) -> list[dict[str, Any]]:
+    """Return open PRs normalized to the `gh pr list --json ...` shape."""
     pulls = _github_api_json(repo, f"repos/{repo}/pulls?state=open&per_page=100") or []
     result: list[dict[str, Any]] = []
     for pull in pulls if isinstance(pulls, list) else []:
@@ -237,6 +247,7 @@ def _rest_list_open_prs(repo: str) -> list[dict[str, Any]]:
 
 
 def _rest_list_open_issues(repo: str) -> list[dict[str, Any]]:
+    """Return open non-PR issues normalized to the `gh issue list` shape."""
     issues = _github_api_json(repo, f"repos/{repo}/issues?state=open&per_page=100") or []
     result: list[dict[str, Any]] = []
     for issue in issues if isinstance(issues, list) else []:
@@ -247,11 +258,13 @@ def _rest_list_open_issues(repo: str) -> list[dict[str, Any]]:
 
 
 def _rest_issue_view(repo: str, number: int) -> dict[str, Any]:
+    """Return one issue normalized to the `gh issue view --json ...` shape."""
     issue = _github_api_json(repo, f"repos/{repo}/issues/{number}") or {}
     return _normalize_issue(issue)
 
 
 def _rest_pr_view(repo: str, number: int) -> dict[str, Any]:
+    """Return PR details normalized to the `gh pr view --json ...` shape."""
     pull = _github_api_json(repo, f"repos/{repo}/pulls/{number}") or {}
     issue = _rest_issue_view(repo, number)
     comments_raw = _github_api_json(repo, f"repos/{repo}/issues/{number}/comments?per_page=100") or []
@@ -274,6 +287,7 @@ def _rest_pr_view(repo: str, number: int) -> dict[str, Any]:
 
 
 def _rest_review_decision(repo: str, number: int) -> str:
+    """Approximate GraphQL `reviewDecision` from REST review states."""
     reviews = _github_api_json(repo, f"repos/{repo}/pulls/{number}/reviews?per_page=100") or []
     states: list[str] = []
     for review in reviews if isinstance(reviews, list) else []:
@@ -284,6 +298,7 @@ def _rest_review_decision(repo: str, number: int) -> str:
 
 
 def _normalize_issue(issue: dict[str, Any]) -> dict[str, Any]:
+    """Normalize REST issue JSON into the subset used by the scheduler."""
     milestone = issue.get("milestone")
     return {
         "number": issue.get("number"),
@@ -297,12 +312,14 @@ def _normalize_issue(issue: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_label(label: Any) -> dict[str, Any]:
+    """Normalize a label string/object into a dict with `name`."""
     if isinstance(label, dict):
         return {"name": str(label.get("name") or "")}
     return {"name": str(label)}
 
 
 def _normalize_milestone(milestone: dict[str, Any]) -> dict[str, Any]:
+    """Normalize REST milestone JSON into the subset used by templates."""
     return {
         "number": milestone.get("number"),
         "title": milestone.get("title") or "",
@@ -316,6 +333,7 @@ def _normalize_milestone(milestone: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_comment(comment: dict[str, Any]) -> dict[str, Any]:
+    """Normalize REST issue comment JSON into the `gh pr view` shape."""
     return {
         "body": comment.get("body") or "",
         "author": _rest_author(comment.get("user")),
@@ -325,6 +343,7 @@ def _normalize_comment(comment: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_review(review: dict[str, Any]) -> dict[str, Any]:
+    """Normalize REST pull-request review JSON into the `gh pr view` shape."""
     return {
         "body": review.get("body") or "",
         "state": review.get("state") or "",
@@ -335,6 +354,7 @@ def _normalize_review(review: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_file(file_info: dict[str, Any]) -> dict[str, Any]:
+    """Normalize REST changed-file JSON into the `gh pr view` shape."""
     filename = file_info.get("filename") or file_info.get("path") or ""
     return {
         "path": filename,
@@ -347,6 +367,7 @@ def _normalize_file(file_info: dict[str, Any]) -> dict[str, Any]:
 
 
 def _rest_author(user: Any) -> dict[str, str]:
+    """Normalize REST user JSON into a dict with `login`."""
     if isinstance(user, dict):
         return {"login": str(user.get("login") or "unknown")}
     return {"login": "unknown"}
@@ -500,7 +521,7 @@ def _remote_stems(repo: str, directory: str, suffix: str) -> set[str]:
 
 
 def gather_repo_state(repo: str) -> RepoState:
-    """Query GitHub plus local repo contents for priority inputs."""
+    """Query gh CLI plus local repo contents for priority inputs."""
     prs_json = _gh(
         [
             "pr",
@@ -547,15 +568,15 @@ def gather_repo_state(repo: str) -> RepoState:
         open_prs=open_prs,
         open_issues=open_issues,
         open_discussions=open_discussions,
-        open_milestones=open_milestones,
         existing_personas=existing_personas,
         existing_scenarios=existing_scenarios,
         prs_with_changes_requested=prs_with_changes_requested,
+        open_milestones=open_milestones,
     )
 
 
 def _fetch_milestones(repo: str) -> list[dict[str, Any]]:
-    """Fetch open milestones using gh or the Python REST fallback."""
+    """Fetch open GitHub milestones with issue counts."""
     try:
         raw = _gh(["api", f"repos/{repo}/milestones?state=open&per_page=100"], repo)
         milestones = json.loads(raw) if raw.strip() else []
@@ -611,14 +632,6 @@ def resolve_priority(state: RepoState, repo: str) -> tuple[str, dict[str, Any]]:
     if len(state.open_prs) >= 5:
         return "skip", {"reason": f"{len(state.open_prs)} PRs already open - avoid pile-up"}
 
-    merge_ready = _find_merge_ready_pr(repo, state, personas)
-    if merge_ready:
-        return "merge_pr", merge_ready
-
-    reject_context = _find_reject_pr(repo, state, personas)
-    if reject_context:
-        return "reject_pr", reject_context
-
     if state.prs_with_changes_requested:
         oldest = min(state.prs_with_changes_requested, key=lambda p: p["number"])
         return "address_changes_requested", _build_address_changes_context(repo, oldest, personas)
@@ -631,6 +644,14 @@ def resolve_priority(state: RepoState, repo: str) -> tuple[str, dict[str, Any]]:
     if missing_required:
         return "migrate_persona", {"persona_id": missing_required}
 
+    rejected_context = _find_rejected_pr(repo, state, personas)
+    if rejected_context:
+        return "reject_pr", rejected_context
+
+    merge_ready_context = _find_merge_ready_pr(repo, state, personas)
+    if merge_ready_context:
+        return "merge_pr", merge_ready_context
+
     accept_context = _find_accept_pr(repo, state, personas)
     if accept_context:
         return "accept_pr", accept_context
@@ -638,6 +659,22 @@ def resolve_priority(state: RepoState, repo: str) -> tuple[str, dict[str, Any]]:
     merge_context = _find_merge_gate_pr(repo, state, personas)
     if merge_context:
         return "merge_gate", merge_context
+
+    closable_issue = _find_closable_issue(state)
+    if closable_issue:
+        return "close_issue", {"issue": closable_issue}
+
+    milestone_assignment = _find_issue_needing_milestone(state)
+    if milestone_assignment:
+        return "assign_milestone", {"issue": milestone_assignment}
+
+    closable_milestone = _find_closable_milestone(state)
+    if closable_milestone:
+        return "close_milestone", {"milestone": closable_milestone}
+
+    create_issue_context = _find_create_issue_request(state, personas)
+    if create_issue_context:
+        return "create_issue", create_issue_context
 
     next_persona = next(
         (p for p in _persona_catalog() if p not in state.existing_personas),
@@ -653,29 +690,13 @@ def resolve_priority(state: RepoState, repo: str) -> tuple[str, dict[str, Any]]:
     if next_scenario:
         return "implement_scenario", {"scenario_id": next_scenario}
 
-    close_issue = _find_close_issue(state, personas)
-    if close_issue:
-        return "close_issue", {"issue": close_issue}
-
-    close_milestone = _find_close_milestone(state, personas)
-    if close_milestone:
-        return "close_milestone", {"milestone": close_milestone}
-
-    create_milestone = _find_create_milestone(state, personas)
-    if create_milestone:
-        return "create_milestone", create_milestone
-
-    assign_milestone = _find_assign_milestone(state, personas)
-    if assign_milestone:
-        return "assign_milestone", assign_milestone
-
-    create_issue = _find_create_issue_request(state, personas)
-    if create_issue:
-        return "create_issue", create_issue
-
     discussion = _find_discussion_to_comment(state, personas)
     if discussion:
         return "comment_discussion", {"discussion": discussion}
+
+    closable_discussion = _find_discussion_to_close(state, personas)
+    if closable_discussion:
+        return "close_discussion", {"discussion": closable_discussion}
 
     audit_issue = _find_audit_issue(state)
     if audit_issue:
@@ -779,87 +800,159 @@ def _find_accept_pr(
     state: RepoState,
     personas: dict[str, MarkdownDoc],
 ) -> dict[str, Any] | None:
-    actor = _first_primary_persona_for_action("accept_pr", personas)
-    if not actor:
+    """Select a PR that passed Rhea's gate but lacks acceptance.
+
+    The release flow is intentionally two-step: Rhea posts the release gate
+    (`RHEA-VERDICT: MERGE_READY` or `RHEA-VERDICT: APPROVE`), then the
+    acceptance persona posts `ACCEPTANCE-DECISION: ACCEPT`. `merge_pr` only
+    fires after that second marker exists.
+    """
+    accept_persona = _first_primary_persona_for_action("accept_pr", personas)
+    if not accept_persona:
         return None
     for pr in sorted(state.open_prs, key=lambda p: int(p["number"])):
         context = _build_review_context(repo, pr, state, personas)
         if context.get("outstanding_reviewers"):
             continue
-        details = context["pr"]
-        if _pr_has_accept_marker(details) or _pr_has_reject_marker(details):
+        body = _combined_pr_thread_text(context["pr"])
+        if _has_any_marker(body, ["ACCEPTANCE-DECISION: ACCEPT", "ACCEPTANCE-DECISION: REJECT"]):
             continue
-        if not _latest_blocker(details).get("body", "").startswith("No REQUEST_CHANGES"):
-            continue
-        context["persona_id"] = actor
-        return context
+        if _has_any_marker(body, ["RHEA-VERDICT: MERGE_READY", "RHEA-VERDICT: APPROVE", "MERGE-GATE: ACCEPT"]):
+            context["persona_id"] = accept_persona
+            return context
     return None
-
 
 def _find_merge_ready_pr(
     repo: str,
     state: RepoState,
     personas: dict[str, MarkdownDoc],
 ) -> dict[str, Any] | None:
-    actor = _first_primary_persona_for_action("merge_pr", personas)
-    if not actor:
+    merge_persona = _first_primary_persona_for_action("merge_pr", personas)
+    if not merge_persona:
         return None
     for pr in sorted(state.open_prs, key=lambda p: int(p["number"])):
         context = _build_review_context(repo, pr, state, personas)
         if context.get("outstanding_reviewers"):
             continue
-        details = context["pr"]
-        if _pr_has_reject_marker(details):
-            continue
-        if _pr_has_accept_marker(details):
-            context["persona_id"] = actor
+        body = _combined_pr_thread_text(context["pr"])
+        if _has_any_marker(body, ["ACCEPTANCE-DECISION: ACCEPT"]):
+            context["persona_id"] = merge_persona
             return context
     return None
 
 
-def _find_reject_pr(
+def _find_rejected_pr(
     repo: str,
     state: RepoState,
     personas: dict[str, MarkdownDoc],
 ) -> dict[str, Any] | None:
-    actor = _first_primary_persona_for_action("reject_pr", personas)
-    if not actor:
+    reject_persona = _first_primary_persona_for_action("reject_pr", personas)
+    if not reject_persona:
         return None
     for pr in sorted(state.open_prs, key=lambda p: int(p["number"])):
         context = _build_review_context(repo, pr, state, personas)
-        details = context["pr"]
-        if _pr_has_reject_marker(details):
-            context["persona_id"] = actor
+        body = _combined_pr_thread_text(context["pr"])
+        if _has_any_marker(body, ["ACCEPTANCE-DECISION: REJECT", "RHEA-VERDICT: REJECT", "FINAL-VERDICT: REJECT"]):
+            context["persona_id"] = reject_persona
             return context
     return None
 
 
-def _pr_bodies(pr: dict[str, Any]) -> list[str]:
-    bodies = [str(pr.get("body") or "")]
+def _combined_pr_thread_text(pr: dict[str, Any]) -> str:
+    parts: list[str] = [str(pr.get("body") or "")]
     for source_name in ("comments", "reviews"):
         for item in pr.get(source_name) or []:
-            bodies.append(str(item.get("body") or ""))
-    return bodies
+            if isinstance(item, dict):
+                parts.append(str(item.get("body") or ""))
+                parts.append(str(item.get("state") or ""))
+    return "\n".join(parts).upper()
 
 
-def _pr_has_accept_marker(pr: dict[str, Any]) -> bool:
-    accepted = (
-        "ACCEPTANCE-DECISION: ACCEPT",
-        "RHEA-VERDICT: MERGE_READY",
-        "RHEA-VERDICT: ACCEPT",
-        "MERGE-GATE: ACCEPT",
-    )
-    return any(marker in body for body in _pr_bodies(pr) for marker in accepted)
+def _has_any_marker(text: str, markers: list[str]) -> bool:
+    upper = text.upper()
+    return any(marker.upper() in upper for marker in markers)
 
 
-def _pr_has_reject_marker(pr: dict[str, Any]) -> bool:
-    rejected = (
-        "ACCEPTANCE-DECISION: REJECT",
-        "PR-STATE: REJECTED",
-        "RHEA-VERDICT: REJECT",
-        "MERGE-GATE: REJECT",
-    )
-    return any(marker in body for body in _pr_bodies(pr) for marker in rejected)
+def _find_closable_issue(state: RepoState) -> dict[str, Any] | None:
+    terminal_labels = {
+        "state:accepted", "state:done", "status:done", "status:complete",
+        "resolution:accepted", "resolution:complete", "accepted", "done",
+    }
+    blocking_labels = {"blocked", "needs-review", "changes-requested", "ready-for-agent"}
+    for issue in sorted(state.open_issues, key=lambda item: int(item["number"])):
+        labels = set(_label_names(issue))
+        if issue.get("number") == 1:
+            continue
+        if labels & terminal_labels and not (labels & blocking_labels):
+            return issue
+    return None
+
+
+def _find_issue_needing_milestone(state: RepoState) -> dict[str, Any] | None:
+    for issue in sorted(state.open_issues, key=lambda item: int(item["number"])):
+        labels = set(_label_names(issue))
+        if issue.get("number") == 1:
+            continue
+        if issue.get("milestone"):
+            continue
+        if "ready-for-agent" in labels or any(label.startswith("work:") for label in labels):
+            return issue
+    return None
+
+
+def _find_closable_milestone(state: RepoState) -> dict[str, Any] | None:
+    for milestone in sorted(state.open_milestones, key=lambda item: str(item.get("due_on") or item.get("title") or "")):
+        if int(milestone.get("open_issues") or 0) == 0 and int(milestone.get("closed_issues") or 0) > 0:
+            return milestone
+    return None
+
+
+def _find_create_issue_request(
+    state: RepoState,
+    personas: dict[str, MarkdownDoc],
+) -> dict[str, Any] | None:
+    """Find an explicit source marker that should become a new issue.
+
+    This is the start point for real-world team requests. A human can add a
+    marker such as `TEAM-REQUEST: Build a new feature to export invoices` to a
+    Discussion or existing issue; the next loop converts it into one bounded
+    `needs-triage` Issue, then future iterations triage and implement it.
+    """
+    actor = _first_primary_persona_for_action("create_issue", personas) or _first_primary_persona_for_action("open_issue", personas)
+    if not actor:
+        return None
+    markers = ("CREATE-ISSUE:", "PROMOTE-TO-ISSUE:", "TEAM-REQUEST:")
+
+    for discussion in state.open_discussions:
+        if _discussion_has_terminal_marker(discussion):
+            continue
+        body = _discussion_text_blob(discussion)
+        if any(marker in body for marker in markers):
+            return {"source_kind": "discussion", "discussion": discussion, "persona_id": actor}
+
+    for issue in sorted(state.open_issues, key=lambda item: int(item["number"])):
+        if issue.get("number") == 1:
+            continue
+        body = str(issue.get("body") or "")
+        labels = set(_label_names(issue))
+        if "needs-followup-issue" in labels or any(marker in body for marker in markers):
+            return {"source_kind": "issue", "issue": issue, "persona_id": actor}
+    return None
+
+
+def _find_discussion_to_close(
+    state: RepoState,
+    personas: dict[str, MarkdownDoc],
+) -> dict[str, Any] | None:
+    closer = _first_primary_persona_for_action("close_discussion", personas)
+    if not closer:
+        return None
+    for discussion in state.open_discussions:
+        if _discussion_has_terminal_marker(discussion):
+            discussion["persona_id"] = closer
+            discussion["node_id"] = discussion.get("node_id") or discussion.get("id")
+            return discussion
+    return None
 
 
 def _load_pr_details(repo: str, pr_number: int) -> dict[str, Any]:
@@ -958,209 +1051,60 @@ def _find_implementation_issue(state: RepoState) -> dict[str, Any] | None:
     return None
 
 
-def _find_close_issue(
-    state: RepoState,
-    personas: dict[str, MarkdownDoc],
-) -> dict[str, Any] | None:
-    if not _first_primary_persona_for_action("close_issue", personas):
-        return None
-    terminal_labels = {"ready-to-close", "agent:close", "state:accepted", "resolution:accepted", "resolution:rejected"}
-    for issue in sorted(state.open_issues, key=lambda item: int(item["number"])):
-        if issue.get("number") == 1:
-            continue
-        labels = set(_label_names(issue))
-        body = str(issue.get("body") or "")
-        if labels & terminal_labels or "ISSUE-STATE: READY_TO_CLOSE" in body:
-            issue["close_reason"] = "not_planned" if "resolution:rejected" in labels or "ISSUE-STATE: REJECTED" in body else "completed"
-            return issue
-    return None
-
-
-def _find_create_issue_request(
-    state: RepoState,
-    personas: dict[str, MarkdownDoc],
-) -> dict[str, Any] | None:
-    actor = _first_primary_persona_for_action("create_issue", personas)
-    if not actor:
-        return None
-    for discussion in state.open_discussions:
-        if _discussion_is_terminal(discussion):
-            continue
-        body = str(discussion.get("body") or "")
-        if "CREATE-ISSUE:" in body or "PROMOTE-TO-ISSUE:" in body:
-            return {"source_kind": "discussion", "discussion": discussion, "persona_id": actor}
-    for issue in sorted(state.open_issues, key=lambda item: int(item["number"])):
-        labels = set(_label_names(issue))
-        body = str(issue.get("body") or "")
-        if "needs-followup-issue" in labels or "CREATE-ISSUE:" in body:
-            return {"source_kind": "issue", "issue": issue, "persona_id": actor}
-    return None
-
-
-def _find_create_milestone(
-    state: RepoState,
-    personas: dict[str, MarkdownDoc],
-) -> dict[str, Any] | None:
-    actor = _first_primary_persona_for_action("create_milestone", personas)
-    if not actor:
-        return None
-    for issue in sorted(state.open_issues, key=lambda item: int(item["number"])):
-        labels = set(_label_names(issue))
-        body = str(issue.get("body") or "")
-        if "needs-milestone-create" in labels or "MILESTONE-REQUEST:" in body:
-            title = _extract_marker_value(body, "MILESTONE-REQUEST:") or str(issue.get("title") or f"Milestone for issue {issue.get('number')}")
-            return {"issue": issue, "requested_milestone_title": title, "persona_id": actor}
-    return None
-
-
-def _find_assign_milestone(
-    state: RepoState,
-    personas: dict[str, MarkdownDoc],
-) -> dict[str, Any] | None:
-    actor = _first_primary_persona_for_action("assign_milestone", personas)
-    if not actor:
-        return None
-    for issue in sorted(state.open_issues, key=lambda item: int(item["number"])):
-        labels = set(_label_names(issue))
-        body = str(issue.get("body") or "")
-        if issue.get("milestone"):
-            continue
-        if "needs-milestone" in labels or "milestone:needed" in labels or "MILESTONE:" in body:
-            requested = _extract_marker_value(body, "MILESTONE:") or "[MILESTONE_TITLE]"
-            return {"issue": issue, "requested_milestone_title": requested, "persona_id": actor}
-    return None
-
-
-def _find_close_milestone(
-    state: RepoState,
-    personas: dict[str, MarkdownDoc],
-) -> dict[str, Any] | None:
-    actor = _first_primary_persona_for_action("close_milestone", personas)
-    if not actor:
-        return None
-    for milestone in sorted(state.open_milestones, key=lambda item: int(item.get("number") or 0)):
-        open_count = int(milestone.get("open_issues") or 0)
-        closed_count = int(milestone.get("closed_issues") or 0)
-        if open_count == 0 and closed_count > 0:
-            milestone["persona_id"] = actor
-            return milestone
-    return None
-
-
-def _extract_marker_value(text: str, marker: str) -> str | None:
-    for line in text.splitlines():
-        if line.strip().startswith(marker):
-            value = line.split(marker, 1)[1].strip()
-            return value or None
-    return None
-
-
 def _find_discussion_to_comment(
     state: RepoState,
     personas: dict[str, MarkdownDoc],
 ) -> dict[str, Any] | None:
-    fallback_persona = _first_primary_persona_for_action("comment_discussion", personas)
-    if not fallback_persona:
+    discussion_persona = _first_primary_persona_for_action("comment_discussion", personas)
+    if not discussion_persona:
         return None
     aliases = _persona_aliases(personas)
     for discussion in state.open_discussions:
-        if _discussion_is_terminal(discussion):
+        category = (discussion.get("category") or {}).get("name") or ""
+        title = str(discussion.get("title") or "")
+        if category != "Idea Lab" and "idea" not in title.lower():
             continue
-        if not _discussion_matches_comment_surface(discussion):
-            continue
-
-        requested_persona = _discussion_requested_persona(discussion, aliases)
-        discussion_persona = requested_persona or fallback_persona
-        if discussion_persona not in personas:
-            continue
-
-        comments = _discussion_comments(discussion)
+        comments = (discussion.get("comments") or {}).get("nodes") or []
         posted, _ = _review_history({"comments": comments, "reviews": []}, aliases)
+        if _discussion_has_terminal_marker(discussion):
+            continue
         if discussion_persona not in posted:
             discussion["persona_id"] = discussion_persona
-            discussion["lifecycle_state"] = _discussion_lifecycle_state(discussion)
-            discussion["needs_comment_reason"] = _discussion_comment_reason(
-                discussion,
-                requested_persona=requested_persona,
-                fallback_persona=fallback_persona,
-                posted=posted,
-            )
+            discussion["node_id"] = discussion.get("node_id") or discussion.get("id")
             return discussion
     return None
 
 
-def _discussion_comments(discussion: dict[str, Any]) -> list[dict[str, Any]]:
-    comments = discussion.get("comments") or {}
-    if isinstance(comments, dict):
-        nodes = comments.get("nodes") or []
-        return nodes if isinstance(nodes, list) else []
-    return comments if isinstance(comments, list) else []
-
-
 def _discussion_text_blob(discussion: dict[str, Any]) -> str:
-    parts = [str(discussion.get("title") or ""), str(discussion.get("body") or "")]
-    for comment in _discussion_comments(discussion):
+    """Return title, body, and comments as one text blob for marker scans."""
+    texts: list[str] = [str(discussion.get("title") or ""), str(discussion.get("body") or "")]
+    comments = (discussion.get("comments") or {}).get("nodes") if isinstance(discussion.get("comments"), dict) else discussion.get("comments")
+    for comment in comments or []:
         if isinstance(comment, dict):
-            parts.append(str(comment.get("body") or ""))
-    return "\n".join(parts)
+            texts.append(str(comment.get("body") or ""))
+    return "\n".join(texts)
 
 
-def _discussion_is_terminal(discussion: dict[str, Any]) -> bool:
-    text = _discussion_text_blob(discussion).lower()
-    return any(marker.lower() in text for marker in _discussion_terminal_markers())
-
-
-def _discussion_lifecycle_state(discussion: dict[str, Any]) -> str:
-    text = _discussion_text_blob(discussion).lower()
-    for marker in _discussion_terminal_markers():
-        if marker.lower() in text:
-            tail = marker.split(":", 1)[-1].strip() if ":" in marker else marker
-            return tail.upper().replace(" ", "_")
-    for marker in _discussion_needs_comment_markers():
-        if marker.lower() in text:
-            return "NEEDS_COMMENT"
-    return "OPEN"
-
-
-def _discussion_matches_comment_surface(discussion: dict[str, Any]) -> bool:
-    category = (discussion.get("category") or {}).get("name") or ""
-    title = str(discussion.get("title") or "")
-    text = _discussion_text_blob(discussion).lower()
-    if category == "Idea Lab" or "idea" in title.lower():
-        return True
-    return any(marker.lower() in text for marker in _discussion_needs_comment_markers())
-
-
-def _discussion_requested_persona(discussion: dict[str, Any], aliases: dict[str, str]) -> str | None:
-    for line in _discussion_text_blob(discussion).splitlines():
-        stripped = line.strip()
-        for marker in ("NEEDS-PERSONA:", "NEEDS-COMMENT:"):
-            if not stripped.upper().startswith(marker):
-                continue
-            tail = stripped[len(marker):].strip()
-            if not tail or tail.lower() in {"any", "anyone", "persona", "comment"}:
-                continue
-            token = _normalize_persona_token(tail)
-            persona_id = aliases.get(token) or aliases.get(token.split("-", 1)[0])
-            if persona_id:
-                return persona_id
-    return None
-
-
-def _discussion_comment_reason(
-    discussion: dict[str, Any],
-    *,
-    requested_persona: str | None,
-    fallback_persona: str,
-    posted: list[str],
-) -> str:
-    if requested_persona:
-        return f"Discussion explicitly requests `{requested_persona}` and no signed comment from that persona was found."
-    if _discussion_lifecycle_state(discussion) == "NEEDS_COMMENT":
-        return "Discussion contains a needs-comment marker and no matching signed persona response was found."
-    if fallback_persona not in posted:
-        return f"Discussion is on an active comment surface and `{fallback_persona}` has not responded yet."
-    return "No signed matching response found."
+def _discussion_has_terminal_marker(discussion: dict[str, Any]) -> bool:
+    """Return True when a Discussion should not receive more bot comments."""
+    terminal_tokens = {
+        "DISCUSSION-STATE: CLOSED",
+        "DISCUSSION-STATE: ANSWERED",
+        "DISCUSSION-STATE: PROMOTED",
+        "DISCUSSION-STATE: REJECTED",
+        "IDEA-STATE: DIDNT-STICK",
+        "IDEA-STATE: PROMOTED",
+        "MAINTAINER-STOP",
+        "HOLD",
+        "BLOCKED",
+    }
+    texts: list[str] = [str(discussion.get("title") or ""), str(discussion.get("body") or "")]
+    comments = (discussion.get("comments") or {}).get("nodes") or []
+    for comment in comments:
+        if isinstance(comment, dict):
+            texts.append(str(comment.get("body") or ""))
+    combined = "\n".join(texts).upper()
+    return any(token in combined for token in terminal_tokens)
 
 
 def _persona_aliases(personas: dict[str, MarkdownDoc]) -> dict[str, str]:
@@ -1322,15 +1266,24 @@ def _persona_from_body(body: str, aliases: dict[str, str]) -> str | None:
 
 
 def _extract_verdict(body: str) -> str:
+    """Extract a persona verdict from modern or legacy review bodies.
+
+    Older comments used ``**Verdict: APPROVE**`` while newer autonomous-loop
+    templates require both ``REVIEW-VERDICT: APPROVE`` and
+    ``**Verdict:** APPROVE``. The loop should count all of those shapes so a
+    formatter tweak does not strand a PR in an infinite review cycle.
+    """
     patterns = [
+        r"^\s*REVIEW-VERDICT:\s*`?([^`\n]+)`?",
         r"\*\*(?:Final\s+)?[Vv]erdict:\s*`?([^*`\n]+)`?\*\*",
+        r"\*\*(?:Final\s+)?[Vv]erdict:\*\*\s*`?([^`\n]+)`?",
         r"^##\s+(?:Final\s+)?[Vv]erdict:\s*`?([^`\n]+)`?",
         r"^\s*(?:Final\s+)?[Vv]erdict:\s*`?([^`\n]+)`?",
     ]
     for pattern in patterns:
         match = re.search(pattern, body, re.MULTILINE)
         if match:
-            verdict = match.group(1).strip().strip("*`")
+            verdict = match.group(1).strip().strip("*`:")
             return verdict.replace(" ", "_")
     return "UNKNOWN"
 
@@ -1347,19 +1300,6 @@ def _label_names(item: dict[str, Any]) -> list[str]:
 
 def _policy_data() -> dict[str, Any]:
     return _load_yaml_file(POLICIES_PATH)
-
-
-def _discussion_policy() -> dict[str, Any]:
-    policy = _policy_data().get("discussion_lifecycle") or {}
-    return policy if isinstance(policy, dict) else {}
-
-
-def _discussion_terminal_markers() -> list[str]:
-    return [str(marker) for marker in _as_list(_discussion_policy().get("terminal_markers"))]
-
-
-def _discussion_needs_comment_markers() -> list[str]:
-    return [str(marker) for marker in _as_list(_discussion_policy().get("needs_comment_markers"))]
 
 
 def _policy_required_reviewers(changed_files: list[str]) -> list[str]:
@@ -1488,10 +1428,6 @@ def _action_variables(
         return _address_changes_variables(context)
     if priority == "merge_gate":
         return _merge_gate_variables(repo, context, max_diff_chars=max_diff_chars)
-    if priority == "accept_pr":
-        return _merge_gate_variables(repo, context, max_diff_chars=max_diff_chars)
-    if priority == "reject_pr":
-        return _merge_gate_variables(repo, context, max_diff_chars=max_diff_chars)
     if priority == "triage_issue":
         return _issue_variables(context, _first_primary_persona_for_action("triage_issue") or "auto-loop")
     if priority == "implement_issue":
@@ -1506,16 +1442,16 @@ def _action_variables(
         return _discussion_variables(context)
     if priority == "merge_pr":
         return _merge_gate_variables(repo, context, max_diff_chars=max_diff_chars)
-    if priority == "close_issue":
-        return _close_issue_variables(context)
-    if priority == "create_issue":
-        return _create_issue_variables(context)
-    if priority == "assign_milestone":
-        return _assign_milestone_variables(context)
-    if priority == "create_milestone":
-        return _create_milestone_variables(context)
-    if priority == "close_milestone":
-        return _close_milestone_variables(context)
+    if priority in {"accept_pr", "reject_pr"}:
+        return _merge_gate_variables(repo, context, max_diff_chars=max_diff_chars)
+    if priority in {"open_issue", "create_issue", "close_issue", "reopen_issue", "assign_milestone"}:
+        return _issue_lifecycle_variables(context, priority)
+    if priority in {"create_milestone", "close_milestone"}:
+        return _milestone_variables(context, priority)
+    if priority in {"request_review", "resolve_review_thread", "verify_agent_action"}:
+        return _generic_action_variables(context, priority)
+    if priority == "close_discussion":
+        return _discussion_variables(context)
     if priority in {
         "prompt_improvement",
         "run_prompt_regression",
@@ -1619,6 +1555,65 @@ def _address_changes_variables(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _issue_lifecycle_variables(context: dict[str, Any], action_id: str) -> dict[str, Any]:
+    issue = context.get("issue") or {}
+    discussion = context.get("discussion") or {}
+    source = issue or discussion
+    source_kind = context.get("source_kind") or ("issue" if issue else "discussion" if discussion else "manual")
+    source_body = str(source.get("body") or "")
+    source_title = str(source.get("title") or "")
+    persona_id = _first_primary_persona_for_action(action_id) or _first_primary_persona_for_action("triage_issue")
+    persona_vars = _persona_variables(_require_persona(persona_id)) if persona_id else _anonymous_persona()
+    proposed_title = _first_nonempty_line(source_body)
+    for marker in ("CREATE-ISSUE:", "PROMOTE-TO-ISSUE:", "TEAM-REQUEST:"):
+        proposed_title = proposed_title.replace(marker, "").strip()
+    return {
+        "issue_number": issue.get("number") or "[ISSUE_NUMBER]",
+        "issue_title": issue.get("title") or "[ISSUE_TITLE]",
+        "issue_body": issue.get("body") or "[ISSUE_BODY]",
+        "issue_labels": _format_inline_list(_label_names(issue)) if issue else "none",
+        "issue_milestone": _issue_milestone_title(issue),
+        "target_milestone_title": _target_milestone_title(issue),
+        "source_kind": source_kind,
+        "source_number": source.get("number") or "[SOURCE_NUMBER]",
+        "source_title": source_title or "[SOURCE_TITLE]",
+        "source_body": source_body or "[SOURCE_BODY]",
+        "source_url": source.get("url") or "[SOURCE_URL]",
+        "proposed_issue_title": proposed_title or source_title or "[ISSUE_TITLE]",
+        "action_id": action_id,
+        **persona_vars,
+    }
+
+
+def _milestone_variables(context: dict[str, Any], action_id: str) -> dict[str, Any]:
+    milestone = context.get("milestone") or {}
+    persona_id = _first_primary_persona_for_action(action_id) or _first_primary_persona_for_action("triage_issue")
+    persona_vars = _persona_variables(_require_persona(persona_id)) if persona_id else _anonymous_persona()
+    return {
+        "milestone_number": milestone.get("number") or "[MILESTONE_NUMBER]",
+        "milestone_title": milestone.get("title") or "[MILESTONE_TITLE]",
+        "milestone_description": milestone.get("description") or "",
+        "milestone_due_on": milestone.get("due_on") or "",
+        "milestone_open_issues": milestone.get("open_issues") or 0,
+        "milestone_closed_issues": milestone.get("closed_issues") or 0,
+        "action_id": action_id,
+        **persona_vars,
+    }
+
+
+def _issue_milestone_title(issue: dict[str, Any]) -> str:
+    milestone = issue.get("milestone") or {}
+    return str(milestone.get("title") or "none") if isinstance(milestone, dict) else str(milestone or "none")
+
+
+def _target_milestone_title(issue: dict[str, Any]) -> str:
+    labels = set(_label_names(issue))
+    for label in labels:
+        if label.startswith("milestone:"):
+            return label.split(":", 1)[1].strip() or "[MILESTONE_TITLE]"
+    return "[MILESTONE_TITLE]"
+
+
 def _issue_variables(context: dict[str, Any], persona_id: str) -> dict[str, Any]:
     issue = context["issue"]
     persona_vars = _persona_variables(_require_persona(persona_id)) if (AGENT_PROMPTS_DIR / f"{persona_id}.md").exists() else _anonymous_persona()
@@ -1627,81 +1622,6 @@ def _issue_variables(context: dict[str, Any], persona_id: str) -> dict[str, Any]
         "issue_title": issue.get("title") or "",
         "issue_body": issue.get("body") or "",
         "issue_labels": _format_inline_list(_label_names(issue)),
-        **persona_vars,
-    }
-
-
-def _close_issue_variables(context: dict[str, Any]) -> dict[str, Any]:
-    issue = context["issue"]
-    persona_id = _first_primary_persona_for_action("close_issue") or "auto-loop"
-    persona_vars = _persona_variables(_require_persona(persona_id)) if (AGENT_PROMPTS_DIR / f"{persona_id}.md").exists() else _anonymous_persona()
-    return {
-        "issue_number": issue.get("number") or "",
-        "issue_title": issue.get("title") or "",
-        "issue_body": issue.get("body") or "",
-        "issue_labels": _format_inline_list(_label_names(issue)),
-        "issue_close_reason": issue.get("close_reason") or "completed",
-        **persona_vars,
-    }
-
-
-def _create_issue_variables(context: dict[str, Any]) -> dict[str, Any]:
-    persona_id = context.get("persona_id") or _first_primary_persona_for_action("create_issue") or "auto-loop"
-    persona_vars = _persona_variables(_require_persona(persona_id)) if (AGENT_PROMPTS_DIR / f"{persona_id}.md").exists() else _anonymous_persona()
-    source_kind = context.get("source_kind") or "manual"
-    source = context.get("discussion") or context.get("issue") or {}
-    number = source.get("number") or ""
-    title = source.get("title") or ""
-    body = source.get("body") or ""
-    return {
-        "source_kind": source_kind,
-        "source_number": number,
-        "source_title": title,
-        "source_body": body,
-        "source_url": source.get("url") or "",
-        "proposed_issue_title": _first_nonempty_line(body).replace("CREATE-ISSUE:", "").replace("PROMOTE-TO-ISSUE:", "").strip() or title or "[ISSUE_TITLE]",
-        **persona_vars,
-    }
-
-
-def _assign_milestone_variables(context: dict[str, Any]) -> dict[str, Any]:
-    issue = context["issue"]
-    persona_id = context.get("persona_id") or _first_primary_persona_for_action("assign_milestone") or "auto-loop"
-    persona_vars = _persona_variables(_require_persona(persona_id)) if (AGENT_PROMPTS_DIR / f"{persona_id}.md").exists() else _anonymous_persona()
-    return {
-        "issue_number": issue.get("number") or "",
-        "issue_title": issue.get("title") or "",
-        "issue_body": issue.get("body") or "",
-        "issue_labels": _format_inline_list(_label_names(issue)),
-        "requested_milestone_title": context.get("requested_milestone_title") or "[MILESTONE_TITLE]",
-        **persona_vars,
-    }
-
-
-def _create_milestone_variables(context: dict[str, Any]) -> dict[str, Any]:
-    issue = context.get("issue") or {}
-    persona_id = context.get("persona_id") or _first_primary_persona_for_action("create_milestone") or "auto-loop"
-    persona_vars = _persona_variables(_require_persona(persona_id)) if (AGENT_PROMPTS_DIR / f"{persona_id}.md").exists() else _anonymous_persona()
-    return {
-        "source_issue_number": issue.get("number") or "",
-        "source_issue_title": issue.get("title") or "",
-        "source_issue_body": issue.get("body") or "",
-        "requested_milestone_title": context.get("requested_milestone_title") or issue.get("title") or "[MILESTONE_TITLE]",
-        **persona_vars,
-    }
-
-
-def _close_milestone_variables(context: dict[str, Any]) -> dict[str, Any]:
-    milestone = context["milestone"]
-    persona_id = milestone.get("persona_id") or _first_primary_persona_for_action("close_milestone") or "auto-loop"
-    persona_vars = _persona_variables(_require_persona(persona_id)) if (AGENT_PROMPTS_DIR / f"{persona_id}.md").exists() else _anonymous_persona()
-    return {
-        "milestone_number": milestone.get("number") or "",
-        "milestone_title": milestone.get("title") or "",
-        "milestone_due_on": milestone.get("due_on") or "none",
-        "milestone_open_issues": milestone.get("open_issues", 0),
-        "milestone_closed_issues": milestone.get("closed_issues", 0),
-        "milestone_url": milestone.get("html_url") or milestone.get("url") or "",
         **persona_vars,
     }
 
@@ -1777,14 +1697,10 @@ def _discussion_variables(context: dict[str, Any]) -> dict[str, Any]:
     persona_vars = _persona_variables(_require_persona(persona_id)) if persona_id else _anonymous_persona()
     return {
         "discussion_number": discussion.get("number") or "[DISCUSSION_NUMBER]",
-        "discussion_node_id": discussion.get("id") or discussion.get("node_id") or "[DISCUSSION_NODE_ID]",
+        "discussion_node_id": discussion.get("node_id") or discussion.get("id") or "[DISCUSSION_NODE_ID]",
         "discussion_title": discussion.get("title") or "[DISCUSSION_TITLE]",
         "discussion_body": discussion.get("body") or "[DISCUSSION_BODY]",
         "discussion_url": discussion.get("url") or "[DISCUSSION_URL]",
-        "discussion_lifecycle_state": discussion.get("lifecycle_state") or _discussion_lifecycle_state(discussion),
-        "discussion_needs_comment_reason": discussion.get("needs_comment_reason") or "No explicit reason recorded.",
-        "discussion_terminal_markers": _format_bullets(_discussion_terminal_markers()),
-        "discussion_needs_comment_markers": _format_bullets(_discussion_needs_comment_markers()),
         **persona_vars,
     }
 
@@ -1814,6 +1730,7 @@ def _persona_variables(persona: MarkdownDoc) -> dict[str, Any]:
 def _persona_comment_template(frontmatter: dict[str, Any], output_section: str) -> str:
     if frontmatter.get("inherits_preamble"):
         return (
+            "REVIEW-VERDICT: CHANGE_ME\n\n"
             "**Verdict:** CHANGE_ME\n\n"
             "**Acceptance matrix:**\n"
             "| Criterion | Status | Evidence (path:line or MISSING) |\n"
@@ -1956,17 +1873,16 @@ def _format_discussion_table(discussions: list[dict[str, Any]]) -> str:
 
 def _format_milestone_table(milestones: list[dict[str, Any]]) -> str:
     if not milestones:
-        return "| Milestone | Due | Open issues | Closed issues |\n| --- | --- | --- | --- |\n| none | none | none | none |"
-    rows = ["| Milestone | Due | Open issues | Closed issues |", "| --- | --- | --- | --- |"]
+        return "| Milestone | Due | Open | Closed |\n| --- | --- | --- | --- |\n| none | none | 0 | 0 |"
+    rows = ["| Milestone | Due | Open | Closed |", "| --- | --- | --- | --- |"]
     for milestone in milestones[:20]:
         rows.append(
             f"| #{milestone.get('number')} {_escape_table(milestone.get('title') or '')} | "
             f"{_escape_table(milestone.get('due_on') or 'none')} | "
-            f"{_escape_table(milestone.get('open_issues', 0))} | "
-            f"{_escape_table(milestone.get('closed_issues', 0))} |"
+            f"{milestone.get('open_issues') or 0} | {milestone.get('closed_issues') or 0} |"
         )
     if len(milestones) > 20:
-        rows.append(f"| ... | ... | {len(milestones) - 20} more milestones omitted | ... |")
+        rows.append(f"| ... | {len(milestones) - 20} more milestones omitted | ... | ... |")
     return "\n".join(rows)
 
 
@@ -2072,7 +1988,7 @@ def _linked_issue_context(repo: str, pr: dict[str, Any]) -> str:
             )
             issue = json.loads(raw)
         except (RuntimeError, json.JSONDecodeError):
-            sections.append(f"## Issue #{number}\nCould not fetch this issue from GitHub.")
+            sections.append(f"## Issue #{number}\nCould not fetch this issue with gh.")
             continue
         sections.append(
             f"## Issue #{issue.get('number')} - {issue.get('title')}\n"
@@ -2154,6 +2070,105 @@ def _render_template(template: str, variables: dict[str, Any]) -> str:
     return re.sub(r"{{\s*([a-zA-Z0-9_]+)\s*}}", replace, template)
 
 
+def validate_rendered_prompt(prompt: str) -> list[str]:
+    """Return render errors for the final generated prompt.
+
+    GitHub Actions diffs may legitimately include expressions such as
+    ``${{ github.actor }}``, so unresolved-template detection ignores braces
+    preceded by ``$`` and only catches next_prompt's own ``{{ variable }}``
+    placeholders.
+    """
+    errors: list[str] = []
+    unresolved = sorted(set(re.findall(r"(?<!\$){{\s*[a-zA-Z0-9_]+\s*}}", prompt)))
+    if unresolved:
+        errors.append("unresolved template variables: " + ", ".join(unresolved))
+    required_fragments = ["# Autonomous loop", "Hard Caps", "Step"]
+    for fragment in required_fragments:
+        if fragment not in prompt:
+            errors.append(f"rendered prompt missing required fragment: {fragment}")
+    return errors
+
+
+def validate_static_config() -> list[str]:
+    """Validate templates, catalog, policy, persona frontmatter, and action ids.
+
+    This check performs no GitHub calls, so it can run in CI or this ChatGPT
+    container before a live ``gh``-backed run.
+    """
+    errors: list[str] = []
+
+    actions = _load_action_catalog()
+    action_ids: set[str] = set()
+    if not actions:
+        errors.append("missing or empty .github/action-templates/catalog.yml")
+    for action in actions:
+        if not isinstance(action, dict):
+            errors.append("action catalog contains a non-object entry")
+            continue
+        action_id = str(action.get("id") or "").strip()
+        template = str(action.get("template") or "").strip()
+        if not action_id:
+            errors.append("action catalog entry missing id")
+            continue
+        if action_id in action_ids:
+            errors.append(f"duplicate action id: {action_id}")
+        action_ids.add(action_id)
+        if not template:
+            errors.append(f"action {action_id} missing template")
+        elif not (ACTION_TEMPLATES_DIR / template).exists():
+            errors.append(f"action {action_id} references missing template: {template}")
+
+    from simulation.tools import marker_registry
+
+    errors.extend(marker_registry.validate_catalog_coverage(action_ids))
+    marker_specs = marker_registry.load_marker_specs()
+    for action_id, spec in marker_specs.items():
+        template_name = _template_name_for_action(action_id)
+        template_path = ACTION_TEMPLATES_DIR / template_name
+        if template_path.exists():
+            text = template_path.read_text()
+            if spec.marker not in text:
+                errors.append(f"action {action_id} template does not mention marker {spec.marker}:")
+
+    personas = _load_persona_index()
+    for persona_id in _persona_catalog():
+        if persona_id not in personas:
+            errors.append(f"roster persona missing prompt: {persona_id}")
+
+    required_frontmatter = {
+        "id", "name", "role", "layer", "version", "model_default", "lens",
+        "verdict_enum", "activates_on", "actions", "forbidden_paths",
+        "context_pack", "inherits_preamble", "owner",
+    }
+    for persona_id, doc in personas.items():
+        missing = sorted(key for key in required_frontmatter if key not in doc.frontmatter)
+        if missing:
+            errors.append(f"persona {persona_id} missing frontmatter: {', '.join(missing)}")
+        actions_block = doc.frontmatter.get("actions") or {}
+        if not isinstance(actions_block, dict):
+            errors.append(f"persona {persona_id} actions must be a mapping")
+            continue
+        for relation in ("primary", "support"):
+            for action_id in _as_list(actions_block.get(relation)):
+                if action_ids and action_id not in action_ids:
+                    errors.append(f"persona {persona_id} references unknown {relation} action: {action_id}")
+        refs = doc.frontmatter.get("context_refs") or {}
+        if isinstance(refs, dict):
+            for action_id, paths in refs.items():
+                if action_ids and str(action_id) not in action_ids:
+                    errors.append(f"persona {persona_id} has context_refs for unknown action: {action_id}")
+                for raw_path in _as_list(paths):
+                    if raw_path.startswith("http") or raw_path.startswith("["):
+                        continue
+                    if not (REPO_ROOT / raw_path).exists():
+                        errors.append(f"persona {persona_id} context ref missing: {raw_path}")
+
+    scenarios = _scenario_catalog()
+    if "catalog" in scenarios:
+        errors.append("scenario catalog must not include catalog")
+    return errors
+
+
 def _fallback_base_template() -> str:
     return (
         "# Autonomous loop - next iteration ({{priority}})\n\n"
@@ -2223,7 +2238,26 @@ def main() -> int:
         default="real",
         help="Render mutation steps as real commands or dry-run echo commands.",
     )
+    parser.add_argument(
+        "--validate-config",
+        action="store_true",
+        help="Validate templates, policies, roster, personas, and action ids without gh.",
+    )
     args = parser.parse_args()
+
+    if args.validate_config:
+        errors = validate_static_config()
+        if errors:
+            print("CONFIG INVALID:", file=sys.stderr)
+            for error in errors:
+                print(f"- {error}", file=sys.stderr)
+            return 2
+        print("CONFIG OK")
+        return 0
+
+    if not shutil.which("gh"):
+        print("ERROR: gh CLI not found in PATH.", file=sys.stderr)
+        return 2
 
     try:
         state = gather_repo_state(args.repo)
@@ -2245,6 +2279,9 @@ def main() -> int:
             max_diff_chars=args.max_diff_chars,
             post_mode=args.post_mode,
         )
+        prompt_errors = validate_rendered_prompt(prompt)
+        if prompt_errors:
+            raise RuntimeError("rendered prompt failed validation: " + "; ".join(prompt_errors))
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

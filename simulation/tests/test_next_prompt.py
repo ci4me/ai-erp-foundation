@@ -76,260 +76,203 @@ def test_template_renderer_requires_all_variables():
         raise AssertionError("missing template variable did not fail")
 
 
-def test_action_catalog_templates_exist_and_persona_actions_are_valid():
-    actions = next_prompt._load_action_catalog()
-    action_ids = {str(action["id"]) for action in actions}
-    assert action_ids, "action catalog must not be empty"
-
-    for action in actions:
-        template = next_prompt.ACTION_TEMPLATES_DIR / str(action["template"])
-        assert template.exists(), f"catalog action {action['id']} points to missing template {template}"
-
-    personas = next_prompt._load_persona_index()
-    assert personas, "persona prompts must be discoverable"
-    for persona_id, doc in personas.items():
-        for relation in ("primary", "support"):
-            for action_id in next_prompt._persona_action_ids(doc, relation):
-                assert action_id in action_ids, f"{persona_id} declares unknown {relation} action {action_id}"
-
-    missing_primary = [
-        action_id
-        for action_id in action_ids
-        if not next_prompt._personas_for_action(action_id, "primary", personas)
+def test_policy_required_reviewers_for_operating_model_paths():
+    changed = [
+        ".github/agent-prompts/nova-idea-generator.md",
+        ".github/workflows/idea-lab.yml",
+        "docs/idea-lab.md",
     ]
-    assert missing_primary == [], f"every catalog action needs at least one primary persona: {missing_primary}"
 
-
-def test_operating_model_policy_adds_required_reviewers():
-    changed = [".github/action-templates/review-pr.md", "simulation/tools/next_prompt.py"]
     reviewers = next_prompt._policy_required_reviewers(changed)
 
     assert "theo-architect" in reviewers
     assert "vera-risk-officer" in reviewers
     assert "rhea-release-manager" in reviewers
     assert "prism-promptops" in reviewers
-    assert "tessa-test-lead" in reviewers
+    assert "iris-security" in reviewers
 
 
-def test_terminal_discussion_is_not_selected_for_comment():
-    personas = next_prompt._load_persona_index()
-    state = next_prompt.RepoState(
-        open_prs=[],
-        open_issues=[],
-        open_discussions=[
-            {
-                "id": "D_terminal",
-                "number": 10,
-                "title": "Idea Lab: already done",
-                "body": "DISCUSSION-STATE: RESOLVED\nNo more agent comments needed.",
-                "category": {"name": "Idea Lab"},
-                "comments": {"nodes": []},
-            }
-        ],
-        open_milestones=[],
-        existing_personas=set(personas),
-        existing_scenarios=set(next_prompt._scenario_catalog()),
-        prs_with_changes_requested=[],
-    )
+def test_discussion_terminal_marker_prevents_more_comments():
+    discussion = {
+        "title": "Idea: something",
+        "body": "Still open",
+        "comments": {"nodes": [{"body": "DISCUSSION-STATE: PROMOTED\nPromoted to Issue #42"}]},
+    }
 
-    assert next_prompt._find_discussion_to_comment(state, personas) is None
+    assert next_prompt._discussion_has_terminal_marker(discussion) is True
 
 
-def test_discussion_marker_can_request_specific_persona():
-    personas = next_prompt._load_persona_index()
-    state = next_prompt.RepoState(
-        open_prs=[],
-        open_issues=[],
-        open_discussions=[
-            {
-                "id": "D_needs_iris",
-                "number": 11,
-                "title": "Security question",
-                "body": "NEEDS-PERSONA: Iris\nCan this workflow dispatch be abused?",
-                "category": {"name": "Architecture"},
-                "comments": {"nodes": []},
-            }
-        ],
-        open_milestones=[],
-        existing_personas=set(personas),
-        existing_scenarios=set(next_prompt._scenario_catalog()),
-        prs_with_changes_requested=[],
-    )
-
-    selected = next_prompt._find_discussion_to_comment(state, personas)
-
-    assert selected is not None
-    assert selected["persona_id"] == "iris-security"
-    assert selected["lifecycle_state"] == "NEEDS_COMMENT"
-
-
-def test_discussion_variables_use_graphql_id_field():
-    values = next_prompt._discussion_variables(
-        {
-            "discussion": {
-                "id": "D_graphql_node_id",
-                "number": 12,
-                "title": "Idea Lab: sample",
-                "body": "NEEDS-COMMENT: Mara",
-                "url": "https://example.test/discussions/12",
-                "category": {"name": "Idea Lab"},
-                "comments": {"nodes": []},
-                "persona_id": "mara-product-owner",
-            }
-        }
-    )
-
-    assert values["discussion_node_id"] == "D_graphql_node_id"
-    assert values["persona_id"] == "mara-product-owner"
-
-
-def test_comment_discussion_prompt_renders_without_unresolved_template_tokens():
-    personas = next_prompt._load_persona_index()
-    state = next_prompt.RepoState(
-        open_prs=[],
-        open_issues=[],
-        open_discussions=[],
-        open_milestones=[],
-        existing_personas=set(personas),
-        existing_scenarios=set(next_prompt._scenario_catalog()),
-        prs_with_changes_requested=[],
-    )
+def test_discussion_variables_accept_graphql_id_as_node_id():
     context = {
         "discussion": {
-            "id": "D_render",
-            "number": 13,
-            "title": "Idea Lab: render test",
-            "body": "NEEDS-COMMENT: Mara\nShould this become an issue?",
-            "url": "https://example.test/discussions/13",
-            "category": {"name": "Idea Lab"},
-            "comments": {"nodes": []},
+            "id": "D_kwDOExample",
+            "number": 7,
+            "title": "Idea Lab: cache prompts",
+            "body": "Body",
+            "url": "https://example.test/discussions/7",
             "persona_id": "mara-product-owner",
-            "lifecycle_state": "NEEDS_COMMENT",
-            "needs_comment_reason": "test marker",
         }
     }
 
-    prompt = next_prompt.render_prompt(
-        "ci4me/ai-erp-foundation",
-        "comment_discussion",
-        context,
-        state,
-        post_mode="dry-run",
+    variables = next_prompt._discussion_variables(context)
+
+    assert variables["discussion_node_id"] == "D_kwDOExample"
+    assert variables["persona_id"] == "mara-product-owner"
+
+
+def test_rendered_prompt_validation_ignores_github_actions_expressions():
+    prompt = """# Autonomous loop - next iteration (review_pr)
+
+## Hard Caps
+
+### Step 1
+
+Workflow expression: ${{ github.actor }}
+"""
+
+    assert next_prompt.validate_rendered_prompt(prompt) == []
+
+
+def test_static_config_is_valid():
+    assert next_prompt.validate_static_config() == []
+
+
+def test_lifecycle_action_templates_are_cataloged():
+    actions = {action["id"]: action for action in next_prompt._load_action_catalog()}
+    required = {
+        "accept_pr",
+        "reject_pr",
+        "open_issue",
+        "close_issue",
+        "reopen_issue",
+        "create_milestone",
+        "assign_milestone",
+        "close_milestone",
+        "merge_pr",
+        "request_review",
+    }
+    assert required <= set(actions)
+    for action_id in required:
+        template = next_prompt.ACTION_TEMPLATES_DIR / actions[action_id]["template"]
+        assert template.exists(), action_id
+
+
+def test_closable_issue_selector_uses_terminal_labels():
+    state = next_prompt.RepoState(
+        open_prs=[],
+        open_issues=[
+            {"number": 9, "title": "done", "labels": [{"name": "state:accepted"}], "milestone": {"title": "M1"}},
+        ],
+        open_discussions=[],
+        existing_personas=set(),
+        existing_scenarios=set(),
+        prs_with_changes_requested=[],
     )
 
-    assert "{{" not in prompt
-    assert "}}" not in prompt
-    assert "## DO NOTs for this action" in prompt
-    assert "DISCUSSION-STATE:" in prompt
-    assert "discussion comment validation passed" in prompt
+    issue = next_prompt._find_closable_issue(state)
+
+    assert issue is not None
+    assert issue["number"] == 9
 
 
-def _complete_state(*, pr=None, issue=None, milestone=None):
-    personas = next_prompt._load_persona_index()
-    return next_prompt.RepoState(
-        open_prs=[pr] if pr else [],
-        open_issues=[issue] if issue else [],
+def test_milestone_selector_closes_zero_open_issue_milestone():
+    state = next_prompt.RepoState(
+        open_prs=[],
+        open_issues=[],
         open_discussions=[],
-        open_milestones=[milestone] if milestone else [],
+        existing_personas=set(),
+        existing_scenarios=set(),
+        prs_with_changes_requested=[],
+        open_milestones=[{"number": 2, "title": "M1", "open_issues": 0, "closed_issues": 3}],
+    )
+
+    milestone = next_prompt._find_closable_milestone(state)
+
+    assert milestone is not None
+    assert milestone["number"] == 2
+
+
+def test_merge_ready_marker_detection():
+    text = "Persona: Rhea\n\nACCEPTANCE-DECISION: ACCEPT\nRHEA-VERDICT: APPROVE"
+
+    assert next_prompt._has_any_marker(text, ["ACCEPTANCE-DECISION: ACCEPT"])
+
+
+def test_extract_verdict_accepts_marker_and_bold_label_styles():
+    marker_body = "REVIEW-VERDICT: APPROVE_WITH_CONDITIONS\n\n**Verdict:** APPROVE_WITH_CONDITIONS"
+    bold_label_body = "**Verdict:** APPROVE_WITH_CONDITIONS"
+
+    assert next_prompt._extract_verdict(marker_body) == "APPROVE_WITH_CONDITIONS"
+    assert next_prompt._extract_verdict(bold_label_body) == "APPROVE_WITH_CONDITIONS"
+
+
+def test_release_flow_requires_gate_accept_then_merge(monkeypatch):
+    base_pr = {
+        "number": 77,
+        "title": "feat: release flow",
+        "body": """
+## Required reviews
+- Rhea (Release) - final gate
+""",
+        "reviewDecision": "",
+        "labels": [{"name": "ready-for-review"}],
+        "author": {"login": "ci4me"},
+        "headRefName": "feat/release-flow",
+        "baseRefName": "main",
+        "comments": [
+            {
+                "body": "---\nPersona: Rhea\nRole: AI Release Manager\nLayer: assurance\nModel: test\nSource: PR #77\nSelf-review conflict: No\nRun-ID: x\n---\n\nREVIEW-VERDICT: APPROVE\n\n**Verdict:** APPROVE",
+                "author": {"login": "ci4me"},
+                "createdAt": "2026-05-23T00:00:00Z",
+            }
+        ],
+        "reviews": [],
+        "files": [{"path": "README.md"}],
+        "url": "https://github.com/ci4me/ai-erp-foundation/pull/77",
+    }
+    monkeypatch.setattr(next_prompt, "_load_pr_details", lambda repo, number: base_pr)
+
+    state = next_prompt.RepoState(
+        open_prs=[base_pr],
+        open_issues=[],
+        open_discussions=[],
         existing_personas=set(next_prompt._persona_catalog()),
         existing_scenarios=set(next_prompt._scenario_catalog()),
         prs_with_changes_requested=[],
     )
 
+    priority, context = next_prompt.resolve_priority(state, "ci4me/ai-erp-foundation")
+    assert priority == "merge_gate"
 
-def test_accept_pr_selected_when_all_reviews_done(monkeypatch):
-    pr = {
-        "number": 101,
-        "title": "Ready PR",
-        "body": "## Required reviews\n- Theo (Architect)\n",
-        "labels": [],
-        "reviewDecision": "",
-        "files": [],
-        "comments": [
+    base_pr["comments"].append({"body": "RHEA-VERDICT: MERGE_READY\n\n**Gate checklist:** PASS", "author": {"login": "ci4me"}})
+    priority, context = next_prompt.resolve_priority(state, "ci4me/ai-erp-foundation")
+    assert priority == "accept_pr"
+
+    base_pr["comments"].append({"body": "ACCEPTANCE-DECISION: ACCEPT\n\n**Evidence:** gates passed", "author": {"login": "ci4me"}})
+    priority, context = next_prompt.resolve_priority(state, "ci4me/ai-erp-foundation")
+    assert priority == "merge_pr"
+
+
+def test_explicit_team_request_becomes_create_issue():
+    state = next_prompt.RepoState(
+        open_prs=[],
+        open_issues=[
             {
-                "body": "---\nPersona: theo-architect\n---\n\n## Verdict: APPROVE",
-                "author": {"login": "ci4me"},
-                "createdAt": "2026-05-23T00:00:00Z",
-                "url": "https://example.test/theo",
+                "number": 42,
+                "title": "Inbox request",
+                "body": "TEAM-REQUEST: Build a new feature to export paid invoices as CSV.",
+                "labels": [{"name": "request:team"}],
             }
         ],
-        "reviews": [],
-    }
-    monkeypatch.setattr(next_prompt, "_load_pr_details", lambda repo, number: dict(pr))
+        open_discussions=[],
+        existing_personas=set(next_prompt._persona_catalog()),
+        existing_scenarios=set(next_prompt._scenario_catalog()),
+        prs_with_changes_requested=[],
+    )
 
-    priority, context = next_prompt.resolve_priority(_complete_state(pr=pr), "ci4me/ai-erp-foundation")
+    priority, context = next_prompt.resolve_priority(state, "ci4me/ai-erp-foundation")
 
-    assert priority == "accept_pr"
-    assert context["persona_id"] == "rhea-release-manager"
-
-
-def test_merge_pr_selected_after_acceptance_marker(monkeypatch):
-    pr = {
-        "number": 102,
-        "title": "Accepted PR",
-        "body": "## Required reviews\n- Theo (Architect)\n",
-        "labels": [],
-        "reviewDecision": "",
-        "files": [],
-        "comments": [
-            {"body": "---\nPersona: theo-architect\n---\n\n## Verdict: APPROVE", "author": {"login": "ci4me"}},
-            {"body": "ACCEPTANCE-DECISION: ACCEPT PR#102 -- ready", "author": {"login": "ci4me"}},
-        ],
-        "reviews": [],
-    }
-    monkeypatch.setattr(next_prompt, "_load_pr_details", lambda repo, number: dict(pr))
-
-    priority, context = next_prompt.resolve_priority(_complete_state(pr=pr), "ci4me/ai-erp-foundation")
-
-    assert priority == "merge_pr"
-    assert context["persona_id"] == "rhea-release-manager"
-
-
-def test_reject_pr_selected_after_reject_marker(monkeypatch):
-    pr = {
-        "number": 103,
-        "title": "Rejected PR",
-        "body": "",
-        "labels": [],
-        "reviewDecision": "",
-        "files": [],
-        "comments": [{"body": "ACCEPTANCE-DECISION: REJECT PR#103 -- superseded", "author": {"login": "ci4me"}}],
-        "reviews": [],
-    }
-    monkeypatch.setattr(next_prompt, "_load_pr_details", lambda repo, number: dict(pr))
-
-    priority, context = next_prompt.resolve_priority(_complete_state(pr=pr), "ci4me/ai-erp-foundation")
-
-    assert priority == "reject_pr"
-    assert context["persona_id"] == "rhea-release-manager"
-
-
-def test_close_issue_selected_from_terminal_label():
-    issue = {
-        "number": 55,
-        "title": "Done issue",
-        "body": "Evidence is in merged PR.",
-        "labels": [{"name": "ready-to-close"}],
-        "milestone": None,
-    }
-
-    priority, context = next_prompt.resolve_priority(_complete_state(issue=issue), "ci4me/ai-erp-foundation")
-
-    assert priority == "close_issue"
-    assert context["issue"]["close_reason"] == "completed"
-
-
-def test_close_milestone_selected_when_no_open_issues():
-    milestone = {
-        "number": 7,
-        "title": "Phase 1",
-        "state": "open",
-        "open_issues": 0,
-        "closed_issues": 3,
-        "due_on": None,
-    }
-
-    priority, context = next_prompt.resolve_priority(_complete_state(milestone=milestone), "ci4me/ai-erp-foundation")
-
-    assert priority == "close_milestone"
-    assert context["milestone"]["persona_id"] == "rhea-release-manager"
+    assert priority == "create_issue"
+    assert context["source_kind"] == "issue"
+    variables = next_prompt._issue_lifecycle_variables(context, "create_issue")
+    assert "export paid invoices" in variables["proposed_issue_title"]

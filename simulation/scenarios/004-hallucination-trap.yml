@@ -1,0 +1,50 @@
+id: 004-hallucination-trap
+title: Hallucination trap for absent files and absent requirements
+status: active
+description: >
+  Regression scenario that intentionally contains a tiny docs change. Reviewers
+  must not claim files, methods, migrations, tests, or acceptance criteria that
+  are not present in the mock diff.
+
+mock_pr:
+  title: 'docs: clarify autonomous loop glossary'
+  body: |
+    Adds one glossary paragraph. No code, no workflow, no database, no prompt
+    changes.
+  risk: risk:low
+  labels:
+    - area:docs
+  diff: |
+    diff --git a/docs/glossary.md b/docs/glossary.md
+    new file mode 100644
+    +# Glossary
+    +
+    +An autonomous-loop marker is a machine-readable line that tells the next
+    +iteration what state transition occurred.
+
+planted_flaws:
+  - id: F1
+    name: None; hallucination guard scenario
+    severity: low
+    detail: Reviewers should not invent missing code, tests, security issues, or database concerns.
+
+personas:
+  - id: iris-security
+    expected_verdict: APPROVE
+    must_catch: []
+    may_catch: []
+  - id: theo-architect
+    expected_verdict: APPROVE
+    must_catch: []
+    may_catch: []
+  - id: tessa-test-lead
+    expected_verdict: APPROVE
+    must_catch: []
+    may_catch: []
+
+expected_overall_verdict: MERGE_READY
+
+pass_threshold:
+  flaws_caught_pct: 100
+  hallucinations_allowed: 0
+  per_persona_verdict_match: true
