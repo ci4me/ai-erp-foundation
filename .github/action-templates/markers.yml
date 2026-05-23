@@ -91,11 +91,11 @@ markers:
     meaning: Outcome of a regression suite run.
 
   run_audit:
-    marker: AUDIT-REPORT
-    values: [POSTED, BLOCKED]
-    regex: '(?im)^AUDIT-REPORT:\s*(POSTED|BLOCKED)\b'
+    marker: AUDIT-STATUS
+    values: [PASS, FAIL, PARTIAL]
+    regex: '(?im)^AUDIT-STATUS:\s*(PASS|FAIL|PARTIAL)\b'
     terminal: false
-    meaning: Audit evidence posted on the issue.
+    meaning: Outcome of an audit run posted on the target issue.
 
   security_audit:
     marker: SECURITY-AUDIT

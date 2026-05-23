@@ -1,0 +1,8 @@
+action: discussion
+required_markers:
+  - marker: "DISCUSSION-STATUS"
+    allowed_values: [RESOLVED, NEEDS_FOLLOWUP]
+required_sections:
+  - heading: "Response"
+    min_length: 20
+post_action_checks: []

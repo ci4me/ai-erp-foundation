@@ -61,9 +61,13 @@ Self-review conflict: Yes
 Run-ID: ${RUN_ID}
 ---
 
+AUDIT-STATUS: PASS|FAIL|PARTIAL — CHANGE_ME_to_one_of_those
+
 ## Audit report
 
 **Issue:** #{{audit_issue_number}} - {{audit_issue_title}}
+
+## Audit findings
 
 **Commands run:**
 - \`python -m simulation.tools.arch_snapshot --output /tmp/ai-erp-arch-snapshot.json\`

@@ -1,8 +1,8 @@
 action: run_audit
 required_markers:
-  - marker: "AUDIT-REPORT"
-    allowed_values: [POSTED, BLOCKED]
+  - marker: "AUDIT-STATUS"
+    allowed_values: [PASS, FAIL, PARTIAL]
 required_sections:
-  - heading: "Audit report"
+  - heading: "Audit findings"
     min_length: 50
 post_action_checks: []

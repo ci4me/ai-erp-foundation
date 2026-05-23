@@ -386,6 +386,19 @@ def validate_action_output(
         # YAML may coerce bare TRUE/FALSE/ON/OFF to bools — stringify defensively.
         allowed = [str(v).upper() for v in (entry.get("allowed_values") or [])]
         hits = [h for h in parse_result.hits if h.marker.upper() == marker.upper()]
+        # Fall back to a direct regex when the schema lists a marker that is
+        # not in markers.yml (e.g. orphan templates like discussion.md).
+        if not hits:
+            pattern = rf"(?im)^{re.escape(marker)}:\s*(?P<value>[A-Z][A-Z0-9_]+)"
+            for match in re.finditer(pattern, output_text):
+                pseudo = MarkerHit(
+                    marker=marker,
+                    value=match.group("value").upper(),
+                    action_id=action_name,
+                    line_number=output_text[: match.start()].count("\n") + 1,
+                    raw_line=match.group(0),
+                )
+                hits.append(pseudo)
         if not hits:
             if allowed:
                 missing.append(f"required marker `{marker}: {{{'|'.join(allowed)}}}` not found")
