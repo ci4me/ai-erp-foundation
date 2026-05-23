@@ -184,6 +184,19 @@ def inspect_open_prs() -> list[PRSnapshot]:
         snapshots.append(snap)
     return snapshots
 
+def _gh(args: list[str], repo: str) -> str:
+    """Run a gh CLI subcommand; raise on non-zero. Returns stdout."""
+    command = ["gh", *args]
+    if args and args[0] != "api":
+        command.extend(["-R", repo])
+
+    result = subprocess.run(
+        command,
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"gh failed: {result.stderr.strip()}")
+    return result.stdout
 
 def _summarize_ci(rollup: list[Any]) -> str:
     if not rollup:
