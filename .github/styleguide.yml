@@ -1,0 +1,34 @@
+version: 0.1.0
+description: >
+  Citeable style-guide rules. Reviewers must cite a rule ID when posting a
+  style comment, e.g. "(style: NAMING.SNAKE_CASE)". Style comments without
+  a citation are ignored — see simulation/tools/lifecycle.py.
+
+rules:
+  NAMING.SNAKE_CASE:
+    rule: Python identifiers use snake_case unless inheriting CamelCase from a framework.
+    severity: minor
+
+  NAMING.NO_ABBREV:
+    rule: Avoid abbreviations except common ones (ID, URL, IO).
+    severity: minor
+
+  FORMAT.LINE_LENGTH:
+    rule: Keep lines under 100 characters where reasonable.
+    severity: minor
+
+  FORMAT.TRAILING_WHITESPACE:
+    rule: No trailing whitespace.
+    severity: minor
+
+  DOCSTRING.PUBLIC_API:
+    rule: Public functions and classes need a one-line docstring.
+    severity: minor
+
+  COMMENT.NO_WHAT:
+    rule: Comments explain WHY, not WHAT — name the identifier for WHAT.
+    severity: minor
+
+  IMPORTS.STDLIB_FIRST:
+    rule: Standard library, third-party, local imports in that order with blank line separators.
+    severity: minor

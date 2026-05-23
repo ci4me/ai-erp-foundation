@@ -26,13 +26,19 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
+from simulation.tools import decision_log
+from simulation.tools import deliberation
+from simulation.tools import lifecycle
 from simulation.tools import lock as lock_mod
+from simulation.tools import optimization
+from simulation.tools import safety
 from simulation.tools import validator
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 STALE_DAYS = 7
+COT_REPEAT_SIMILARITY = 0.85
 DEFER_MARKER_RE = re.compile(r"(?im)^TRIAGE-DECISION:\s*DEFER\b")
 WAIT_FOR_HUMAN_LABELS = frozenset({"wait_for_human", "wait-for-human", "needs-human"})
 DESIGN_LOOP_MARKER_RE = re.compile(r"(?im)^DESIGN-APPROVAL:\s*REQUEST_CHANGES\b")
@@ -317,6 +323,125 @@ def check_locks_and_cycles(
          than corrupt the issue.
     """
     issue_number = int(issue.get("number", 0))
+    full_text = (issue.get("body") or "") + "\n" + "\n".join(
+        (c.get("body") or "") for c in (issue.get("comments") or [])
+    )
+
+    # 0a. Ethics check trumps everything.
+    verdict = safety.ethics_check(full_text)
+    if verdict.triggered and not verdict.has_override:
+        return GuardDecision(
+            action_override="post_status_and_exit",
+            reason=f"ethics:{','.join(verdict.matched)}",
+            context={
+                "marker": "LOOP-STATUS: BLOCKED",
+                "ethics_violation": True,
+                "matched_keywords": verdict.matched,
+                "needs_label": "ethics-review",
+            },
+        )
+
+    # 0b. Dangerous keyword from human comment without FORCE: YES.
+    dangerous, matched_dangerous = safety.is_dangerous(full_text)
+    if dangerous and not safety.is_force_acknowledged(full_text):
+        return GuardDecision(
+            action_override="post_status_and_exit",
+            reason=f"dangerous:{','.join(matched_dangerous)}",
+            context={
+                "marker": "LOOP-STATUS: BLOCKED",
+                "needs_force_ack": True,
+                "matched_keywords": matched_dangerous,
+            },
+        )
+
+    # 0c. Pause overrides every action while active.
+    paused, pause_reason = deliberation.pause_state(issue)
+    if paused:
+        return GuardDecision(
+            abort=True,
+            reason=f"paused:{pause_reason}",
+            context={"add_labels": [deliberation.PAUSE_LABEL]},
+        )
+
+    # 0d. 30-day convergence escalation.
+    if lifecycle.final_convergence_check(issue, now=now):
+        return GuardDecision(
+            action_override="open_followup_issue",
+            reason="convergence_30d",
+            context={
+                "escalate_to_human": True,
+                "needs_label": "human-escalation",
+                "summary_of_attempts": True,
+            },
+        )
+
+    # 0e. CoT repetition loop-breaker.
+    cot_entries = decision_log.parse_cot_entries(issue.get("body") or "")
+    if len(cot_entries) >= 2:
+        sim = deliberation.jaccard_similarity(cot_entries[-1].content, cot_entries[-2].content)
+        if sim >= COT_REPEAT_SIMILARITY and not has_progress(issue):
+            return GuardDecision(
+                action_override="close_issue",
+                reason=f"cot_repeat:{sim:.2f}",
+                context={
+                    "issue_close_reason": "UNRESOLVED",
+                    "marker": "ISSUE-CLOSED: UNRESOLVED",
+                    "add_labels": ["stuck-reasoning"],
+                    "close_comment": (
+                        f"SYSTEM: Repeated reasoning detected (similarity {sim:.2%}). "
+                        "Looping – escalating to human."
+                    ),
+                },
+            )
+
+    # 1. Quick-fix bypass for trivial TEAM-REQUESTs.
+    if proposed_action in {"triage_issue", "design_solution"} and optimization.quick_fix_bypass(issue):
+        return GuardDecision(
+            action_override="implement_issue",
+            reason="quick_fix_bypass",
+            context={"quick_fix": True},
+        )
+
+    # 2. Stale awaiting-human → close as INACTIVE.
+    if optimization.is_stale_clarification(issue, now=now):
+        return GuardDecision(
+            action_override="close_issue",
+            reason="stale_clarification",
+            context={
+                "issue_close_reason": "INACTIVE",
+                "marker": "ISSUE-CLOSED: INACTIVE",
+            },
+        )
+
+    # 3. State-hash loop breaker.
+    labels = {label.get("name", "") for label in issue.get("labels") or []}
+    if optimization.should_break_loop(optimization.stuck_count(labels)):
+        return GuardDecision(
+            action_override="close_issue",
+            reason="state_hash_stuck",
+            context={
+                "issue_close_reason": "UNRESOLVED",
+                "marker": "ISSUE-CLOSED: UNRESOLVED",
+                "add_labels": ["circular-loop"],
+            },
+        )
+
+    # 4. Identical-feedback cycle breaker — only when nothing else moved.
+    feedback_bodies = [
+        c.get("body") or ""
+        for c in (issue.get("comments") or [])
+        if "REQUEST_CHANGES" in (c.get("body") or "") or "REJECT" in (c.get("body") or "")
+    ]
+    if optimization.detect_identical_feedback(feedback_bodies) and not has_progress(issue):
+        return GuardDecision(
+            action_override="close_issue",
+            reason="identical_feedback",
+            context={
+                "issue_close_reason": "UNRESOLVED",
+                "marker": "ISSUE-CLOSED: UNRESOLVED",
+                "close_comment": "Identical feedback repeated – human intervention required.",
+            },
+        )
 
     stuck, why = is_stuck(issue, max_retries=max_retries)
     if stuck:

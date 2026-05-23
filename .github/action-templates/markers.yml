@@ -194,8 +194,8 @@ markers:
 
   close_issue:
     marker: ISSUE-CLOSED
-    values: [DONE, REJECTED, DUPLICATE, UNRESOLVED, TIMEOUT]
-    regex: '(?im)^ISSUE-CLOSED:\s*(DONE|REJECTED|DUPLICATE|UNRESOLVED|TIMEOUT)\b'
+    values: [DONE, REJECTED, DUPLICATE, UNRESOLVED, TIMEOUT, INACTIVE]
+    regex: '(?im)^ISSUE-CLOSED:\s*(DONE|REJECTED|DUPLICATE|UNRESOLVED|TIMEOUT|INACTIVE)\b'
     terminal: true
     meaning: Issue closed with terminal reason.
 

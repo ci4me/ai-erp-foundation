@@ -363,6 +363,17 @@ def validate_action_output(
     parse_result = parse_body(output_text, comment_length=len(output_text))
     missing: list[str] = []
 
+    # Chain-of-Thought is required when the caller passes issue context
+    # (which carries the body + labels needed to pick a complexity bucket).
+    # Status-only actions and callers without context are skipped — the
+    # latter keeps older tests/scripts that pre-date CoT working.
+    if action_name not in {"post_status_and_exit", "skip"} and issue_context:
+        ctx = issue_context
+        labels = [label.get("name", "") for label in ctx.get("labels") or []]
+        cot_ok, cot_msg = validate_cot(output_text, ctx.get("body") or "", labels)
+        if not cot_ok:
+            missing.append(cot_msg)
+
     required_markers = schema.get("required_markers") or []
     for entry in required_markers:
         marker = (entry.get("marker") or "").strip()
@@ -419,6 +430,15 @@ def validate_action_output(
     )
 
 
+def extract_markers(body: str) -> list[MarkerHit]:
+    """Return every marker found in ``body`` in order of appearance.
+
+    Thin wrapper around :func:`parse_body` for callers that only need the
+    list of hits and not the unknown/invalid/warnings sidebar.
+    """
+    return list(parse_body(body).hits)
+
+
 def detect_repeated_unknown_marker(
     bodies: Iterable[str],
 ) -> dict[str, int]:
@@ -433,3 +453,66 @@ def detect_repeated_unknown_marker(
         for entry in result.unknown:
             counts[entry.token] = counts.get(entry.token, 0) + 1
     return counts
+
+
+# ---------------------------------------------------------------------------
+# Chain-of-Thought (CoT) extraction and validation.
+# ---------------------------------------------------------------------------
+
+_COT_HEADER_RE = re.compile(
+    r"\*\*Reasoning:\*\*\s*(?P<body>.*?)(?=\n\s*\n[A-Z][A-Z-]+:|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+_COT_STEP_RE = re.compile(
+    r"^\s*(\d+)\.\s+(?P<text>.+?)(?=^\s*\d+\.\s+|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def extract_cot(output_text: str) -> str:
+    """Return the text inside ``**Reasoning:**`` … (until blank line + marker)."""
+    if not output_text:
+        return ""
+    match = _COT_HEADER_RE.search(output_text)
+    return match.group("body").strip() if match else ""
+
+
+def _parse_cot_steps(cot_text: str) -> list[str]:
+    if not cot_text:
+        return []
+    out: list[str] = []
+    for match in _COT_STEP_RE.finditer(cot_text + "\n"):
+        out.append(match.group("text").strip())
+    return out
+
+
+def validate_cot(
+    output_text: str,
+    issue_body: str,
+    labels: list[str] | tuple[str, ...],
+) -> tuple[bool, str]:
+    """Confirm the CoT section meets complexity-derived minimums.
+
+    Returns ``(ok, message)``. On success ``message`` is ``"CoT valid"``;
+    on failure it explains exactly which constraint failed so the next
+    iteration can fix the right thing.
+    """
+    from simulation.tools import complexity as _complexity  # lazy to avoid cycle
+
+    spec = _complexity.detect_complexity(issue_body, list(labels or []))
+    min_steps = int(spec["min_steps"])
+    min_words = int(spec["min_words_per_step"])
+    cot_text = extract_cot(output_text)
+    if not cot_text:
+        return (
+            False,
+            f"Missing `**Reasoning:**` section with at least {min_steps} numbered steps.",
+        )
+    steps = _parse_cot_steps(cot_text)
+    if len(steps) < min_steps:
+        return False, f"Need at least {min_steps} reasoning steps, found {len(steps)}."
+    for i, step in enumerate(steps, start=1):
+        words = len(step.split())
+        if words < min_words:
+            return False, f"Step {i} has only {words} words (minimum {min_words})."
+    return True, "CoT valid"
