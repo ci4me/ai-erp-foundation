@@ -45,6 +45,11 @@ STALL_TRACKER = loop_speedup.StallTracker()
 MAX_RETRIES = 3
 STALE_DAYS = 7
 COT_REPEAT_SIMILARITY = 0.85
+
+# Discussion categories the loop scans for NEEDS-* markers and PLAN-REQUEST.
+# Adding `Announcements` lets release notes / status posts surface as
+# actionable work for the comment_discussion selector.
+DISCUSSION_CATEGORIES = ("General", "Ideas", "Announcements")
 DEFER_MARKER_RE = re.compile(r"(?im)^TRIAGE-DECISION:\s*DEFER\b")
 WAIT_FOR_HUMAN_LABELS = frozenset({"wait_for_human", "wait-for-human", "needs-human"})
 DESIGN_LOOP_MARKER_RE = re.compile(r"(?im)^DESIGN-APPROVAL:\s*REQUEST_CHANGES\b")
