@@ -3,6 +3,7 @@ id: base
 description: Wrapper around every autonomous-loop action prompt
 ---
 
+<!-- CACHE -->
 # Autonomous loop - next iteration ({{priority}})
 
 Generated at {{generated_at}} by `simulation/tools/next_prompt.py`.

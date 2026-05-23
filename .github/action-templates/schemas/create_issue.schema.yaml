@@ -1,0 +1,8 @@
+action: create_issue
+required_markers:
+  - marker: "ISSUE-STATE"
+    allowed_values: [CREATED, REOPENED]
+required_sections:
+  - heading: "Acceptance criteria"
+    min_length: 20
+post_action_checks: []

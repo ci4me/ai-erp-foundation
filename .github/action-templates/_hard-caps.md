@@ -19,4 +19,6 @@ description: Non-negotiable autonomous-loop limits shared by every action
 - Never post a duplicate persona response unless `next_prompt.py` selected that persona from fresh GitHub state.
 - Never post a PR review, discussion comment, acceptance decision, or close decision without passing `python -m simulation.tools.validate_agent_action` for the body you are about to post.
 - Never convert a discussion/comment into an Issue unless the selected action is `create_issue` or `promote_idea` and the source contains `CREATE-ISSUE:` or `PROMOTE-TO-ISSUE:`.
+- **Action chaining**: an output may end with `CHAIN-NEXT: <action>` to skip the next round-trip and continue inline. The chain depth is capped at 3 actions per iteration. Allowed chain targets are listed in `simulation/tools/loop_speedup.ALLOWED_CHAIN_ACTIONS`. After 3 chained actions, stop and let `next_prompt.py` re-read fresh GitHub state.
+- **Prompt caching**: the rendered prompt prefix is delimited by `<!-- CACHE -->` so SDK callers can mark everything above it as `cache_control: ephemeral`. Do not move the sentinel.
 

@@ -9,8 +9,8 @@ description: >
 markers:
   review_pr:
     marker: REVIEW-VERDICT
-    values: [APPROVE, APPROVE_WITH_CONDITIONS, REQUEST_CHANGES, BLOCKED]
-    regex: '(?im)^REVIEW-VERDICT:\s*(APPROVE|APPROVE_WITH_CONDITIONS|REQUEST_CHANGES|BLOCKED)\b'
+    values: [APPROVE, APPROVE_WITH_CONDITIONS, REQUEST_CHANGES, CHANGES_REQUESTED, BLOCKED, BLOCK, DEFER, PROPOSE, REJECT, COMMENT, ABSTAIN]
+    regex: '(?im)^REVIEW-VERDICT:\s*(APPROVE_WITH_CONDITIONS|APPROVE|CHANGES_REQUESTED|REQUEST_CHANGES|BLOCKED|BLOCK|DEFER|PROPOSE|REJECT|COMMENT|ABSTAIN)\b'
     terminal: false
     meaning: PR review verdict from a persona.
     transitions:
@@ -272,3 +272,6 @@ markers:
     regex: '(?im)^CONSISTENCY-CHECK:\s*(PASS|FIXED|BLOCKED)\b'
     terminal: false
     meaning: Outcome of the cross-state consistency sweep.
+
+  # CHAIN-NEXT is intentionally not registered — it has no catalog action;
+  # see simulation/tools/loop_speedup.parse_chain_next for the parser.

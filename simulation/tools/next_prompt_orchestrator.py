@@ -31,10 +31,16 @@ from simulation.tools import deliberation
 from simulation.tools import lifecycle
 from simulation.tools import lock as lock_mod
 from simulation.tools import optimization
+from simulation.tools import loop_speedup
 from simulation.tools import safety
 from simulation.tools import validator
 
 logger = logging.getLogger(__name__)
+
+# Process-local dedupe + stall caches. Each fresh CLI invocation gets a
+# fresh cache, which is exactly how the loop runs in production.
+DEDUPE_CACHE = loop_speedup.DedupeCache()
+STALL_TRACKER = loop_speedup.StallTracker()
 
 MAX_RETRIES = 3
 STALE_DAYS = 7
@@ -393,6 +399,31 @@ def check_locks_and_cycles(
                     ),
                 },
             )
+
+    # 0f. Auto-apply policy labels before any other decision so that
+    # subsequent guards see the labels the human implied (risk:high etc).
+    missing_labels = loop_speedup.infer_policy_labels(issue)
+    if missing_labels:
+        labels = (issue.get("labels") or []) + [{"name": label} for label in missing_labels]
+        issue["labels"] = labels  # in-place: cheap and the orchestrator owns this dict
+
+    # 0g. Stall detection: same hash twice in a row → skip this issue.
+    should_skip, stall = STALL_TRACKER.observe(issue)
+    if should_skip:
+        return GuardDecision(
+            abort=True,
+            reason=f"stalled:{stall}",
+            context={"add_labels": ["stalled"], "stall_count": stall},
+        )
+
+    # 0h. Dedupe: refuse to repeat the same (persona, target, action) within window.
+    persona_id = (issue.get("persona_id") or "").strip() or "unknown"
+    target_id = issue.get("number", 0)
+    if DEDUPE_CACHE.is_duplicate(persona_id, target_id, proposed_action):
+        return GuardDecision(
+            abort=True,
+            reason=f"dedupe:{persona_id}:{target_id}:{proposed_action}",
+        )
 
     # 1. Quick-fix bypass for trivial TEAM-REQUESTs.
     if proposed_action in {"triage_issue", "design_solution"} and optimization.quick_fix_bypass(issue):
