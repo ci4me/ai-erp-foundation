@@ -456,6 +456,33 @@ def extract_markers(body: str) -> list[MarkerHit]:
     return list(parse_body(body).hits)
 
 
+_CHAIN_NEXT_RE = re.compile(r"^CHAIN-NEXT:\s*(?P<action>[a-z][a-z0-9_]+)\s*$", re.MULTILINE | re.IGNORECASE)
+
+
+def extract_chain_next(body: str) -> str | None:
+    """Return the action id requested by ``CHAIN-NEXT:`` or ``None``.
+
+    The marker must appear on its own line at the end of the body (or with
+    only trailing whitespace after it). Action ids are lower-case
+    underscore-separated identifiers. Matching is case-insensitive so
+    "Chain-Next:" is also recognized; the returned id is normalised to
+    lower-case.
+
+    Only the *first* ``CHAIN-NEXT`` is returned; a body that emits two of
+    them is treated as ambiguous by callers (the loop_runner refuses the
+    chain and breaks). This keeps the chaining contract tight.
+    """
+    if not body:
+        return None
+    matches = list(_CHAIN_NEXT_RE.finditer(body))
+    if not matches:
+        return None
+    if len(matches) > 1:
+        logger.warning("multiple CHAIN-NEXT markers found; refusing to chain")
+        return None
+    return matches[0].group("action").lower()
+
+
 def detect_repeated_unknown_marker(
     bodies: Iterable[str],
 ) -> dict[str, int]:

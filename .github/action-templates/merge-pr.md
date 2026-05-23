@@ -21,3 +21,14 @@ else
   echo "DRY-RUN: gh pr merge {{pr_number}} --repo {{repo}} --squash --delete-branch"
 fi
 ```
+
+## Optional Chaining
+
+After a successful merge the loop can close the linked issue inline:
+
+```
+CHAIN-NEXT: close_issue
+```
+
+Skip the chain when the issue should remain open for follow-up work
+(for example, when the merge only landed part of a multi-PR plan).

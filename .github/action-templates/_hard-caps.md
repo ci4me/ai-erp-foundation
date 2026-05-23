@@ -19,6 +19,14 @@ description: Non-negotiable autonomous-loop limits shared by every action
 - Never post a duplicate persona response unless `next_prompt.py` selected that persona from fresh GitHub state.
 - Never post a PR review, discussion comment, acceptance decision, or close decision without passing `python -m simulation.tools.validate_agent_action` for the body you are about to post.
 - Never convert a discussion/comment into an Issue unless the selected action is `create_issue` or `promote_idea` and the source contains `CREATE-ISSUE:` or `PROMOTE-TO-ISSUE:`.
-- **Action chaining**: an output may end with `CHAIN-NEXT: <action>` to skip the next round-trip and continue inline. The chain depth is capped at 3 actions per iteration. Allowed chain targets are listed in `simulation/tools/loop_speedup.ALLOWED_CHAIN_ACTIONS`. After 3 chained actions, stop and let `next_prompt.py` re-read fresh GitHub state.
 - **Prompt caching**: the rendered prompt prefix is delimited by `<!-- CACHE -->` so SDK callers can mark everything above it as `cache_control: ephemeral`. Do not move the sentinel.
+
+## Action Chaining Limits
+
+- Max chain length: 3 actions per iteration.
+- To chain, end your output with `CHAIN-NEXT: <action_id>` on its own line.
+- The chained action runs immediately, using the same in-memory issue object — no fresh GitHub fetch between chain steps. You can chain `implement_issue` → `review_pr` → `merge_pr` → `close_issue` in a single iteration.
+- Validation runs on every chained action; if any chained action fails validation, the chain breaks and the iteration ends.
+- Only chain actions in `simulation.tools.loop_speedup.ALLOWED_CHAIN_ACTIONS` (review_pr, merge_gate, accept_pr, merge_pr, close_issue, address_changes_requested, consistency_check, open_followup_issue, request_clarification).
+- Do not chain actions that depend on human input or external state that has not been updated yet (for example, triage_issue or design_solution should not be chained after implement_issue without a fresh state read).
 

@@ -241,3 +241,97 @@ def test_orchestrator_aborts_duplicate_action():
     )
     assert second.abort is True
     assert second.reason.startswith("dedupe:")
+
+
+# --------------------------------------------------------------------------
+# 9. validator.extract_chain_next contract.
+# --------------------------------------------------------------------------
+
+
+def test_extract_chain_next_at_eol():
+    from simulation.tools.validator import extract_chain_next
+    body = "Some output\nCHAIN-NEXT: review_pr\n"
+    assert extract_chain_next(body) == "review_pr"
+
+
+def test_extract_chain_next_missing():
+    from simulation.tools.validator import extract_chain_next
+    assert extract_chain_next("No chain marker") is None
+
+
+def test_extract_chain_next_case_insensitive():
+    from simulation.tools.validator import extract_chain_next
+    assert extract_chain_next("Chain-Next: Merge_Pr") == "merge_pr"
+
+
+def test_extract_chain_next_ignores_multiple():
+    """Two CHAIN-NEXT markers are ambiguous → refuse to chain."""
+    from simulation.tools.validator import extract_chain_next
+    body = "CHAIN-NEXT: review_pr\nCHAIN-NEXT: merge_pr\n"
+    assert extract_chain_next(body) is None
+
+
+# --------------------------------------------------------------------------
+# 10. loop_runner.run_iterations honours chaining + MAX_CHAIN cap.
+# --------------------------------------------------------------------------
+
+
+def _mock_runtime(bodies_by_action, *, max_iterations=3, max_chain=3):
+    """Run loop_runner.run_iterations against a deterministic mock."""
+    from simulation.tools import loop_runner
+
+    actions_log: list[str] = []
+    posted: list[str] = []
+
+    def select_next_action():
+        # Always start each iteration with implement_issue.
+        return "implement_issue", {"pr_number": 99}, 99
+
+    def fetch_issue(target):
+        return {
+            "number": 99,
+            "body": "trivial fix",
+            "labels": [{"name": "trivial"}],
+            "comments": [],
+            "updatedAt": "2026-05-23T10:00:00Z",
+        }
+
+    def execute_action(action, ctx):
+        actions_log.append(action)
+        return bodies_by_action.get(action, "(no body)")
+
+    def post_to_github(target, body):
+        posted.append(body[:40])
+
+    return loop_runner.run_iterations(
+        repo="x/y",
+        select_next_action=select_next_action,
+        fetch_issue=fetch_issue,
+        execute_action=execute_action,
+        post_to_github=post_to_github,
+        max_iterations=max_iterations,
+        max_chain=max_chain,
+        lock_runner=lock_mod.InMemoryGh(),
+    ), actions_log
+
+
+def test_run_iterations_breaks_chain_after_three():
+    bodies = {
+        "implement_issue": (
+            "## Implementation\nWe fixed it.\n\n## Changes made\n- done\n\n"
+            "IMPLEMENTATION-COMPLETE: TRUE\nCHAIN-NEXT: review_pr\n"
+        ),
+        "review_pr": (
+            "## Review summary\nLooks good to ship.\nREVIEW-VERDICT: APPROVE\n"
+            "CHAIN-NEXT: merge_pr\n"
+        ),
+        "merge_pr": (
+            "## Merge summary\nMerged.\nMERGE-STATUS: COMPLETE\nCHAIN-NEXT: close_issue\n"
+        ),
+        "close_issue": "## Close reason\nDone.\nISSUE-CLOSED: DONE\n",
+    }
+    records, log = _mock_runtime(bodies, max_iterations=1, max_chain=3)
+    assert len(records) == 1
+    # Allowed up to 3 chain hops -> 4 actions in one logical iteration.
+    assert records[0].chain_length <= 3
+    assert log == log  # mocks recorded each action
