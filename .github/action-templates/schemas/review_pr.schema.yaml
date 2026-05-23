@@ -1,0 +1,8 @@
+action: review_pr
+required_markers:
+  - marker: "REVIEW-VERDICT"
+    allowed_values: [APPROVE, APPROVE_WITH_CONDITIONS, REQUEST_CHANGES, BLOCKED]
+required_sections:
+  - heading: "Review summary"
+    min_length: 30
+post_action_checks: []

@@ -7,7 +7,7 @@ description: >
 
 actions:
   - id: review_pr
-    priority: 20
+    priority: 100
     template: review-pr.md
     class: review
     selector: open_pr_needs_persona_review
@@ -34,7 +34,7 @@ actions:
     compact_steps: [Check CI and quorum, verify no blockers, post MERGE_READY or BLOCKED]
 
   - id: merge_pr
-    priority: 35
+    priority: 100
     template: merge-pr.md
     class: release
     selector: pr_has_merge_ready_gate
@@ -63,7 +63,7 @@ actions:
     compact_steps: [Read schema and examples, write scenario YAML, validate dry-run, open risk:high PR]
 
   - id: triage_issue
-    priority: 50
+    priority: 100
     template: triage-issue.md
     class: planning
     selector: untriaged_issue
@@ -72,7 +72,7 @@ actions:
     compact_steps: [Read issue, classify risk, choose required personas dynamically, post triage]
 
   - id: implement_issue
-    priority: 55
+    priority: 100
     template: implement-issue.md
     class: implementation
     selector: ready_issue_without_pr
@@ -227,7 +227,7 @@ actions:
     compact_steps: [Read source, draft one bounded issue, create needs-triage issue, stop]
 
   - id: close_issue
-    priority: 89
+    priority: 100
     template: close-issue.md
     class: planning
     selector: issue_ready_to_close
@@ -279,3 +279,48 @@ actions:
     mutates: issue_comment
     when: The repo is intentionally saturated because too many PRs are open.
     compact_steps: [Post signed skip reason, stop]
+
+  - id: design_solution
+    priority: 100
+    template: implement-issue.md
+    class: implementation
+    selector: ready_issue_needs_design
+    mutates: issue_comment
+    when: An issue requires a design proposal before implementation.
+    compact_steps: [Read issue, draft design, post DESIGN-APPROVAL marker]
+
+  - id: retry_implementation
+    priority: 90
+    template: retry_implementation.md
+    class: implementation
+    selector: failed_implementation_within_retry_budget
+    mutates: issue_comment, branch_commit, pull_request
+    when: A previous implementation attempt failed and the retry budget is not exhausted.
+    compact_steps: [Read failure cause, retry implementation with backoff, post RETRY-IMPLEMENTATION marker]
+
+  - id: retry_merge
+    priority: 90
+    template: retry_merge.md
+    class: release
+    selector: failed_merge_within_retry_budget
+    mutates: issue_comment, pull_request_merge
+    when: A previous merge attempt failed and the retry budget is not exhausted.
+    compact_steps: [Re-check ready gate, retry merge once, post RETRY-MERGE marker]
+
+  - id: request_clarification
+    priority: 50
+    template: request_clarification.md
+    class: planning
+    selector: unknown_marker_present
+    mutates: issue_comment
+    when: An unknown or malformed marker was observed and the loop needs human input.
+    compact_steps: [List unknown marker and valid marker enum, post CLARIFICATION-REQUEST marker]
+
+  - id: consistency_check
+    priority: 10
+    template: consistency_check.md
+    class: audit
+    selector: cross_state_inconsistency_detected
+    mutates: issue_close, issue_comment
+    when: A scheduled sweep finds inconsistencies between PR, issue, and marker state.
+    compact_steps: [Sweep merged PRs vs open issues, sweep DONE markers vs state, close orphans, post CONSISTENCY-CHECK marker]

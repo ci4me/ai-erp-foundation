@@ -1,0 +1,11 @@
+action: close_issue
+required_markers:
+  - marker: "ISSUE-CLOSED"
+    allowed_values: [DONE, REJECTED, DUPLICATE, UNRESOLVED, TIMEOUT]
+required_sections:
+  - heading: "Close reason"
+    min_length: 20
+post_action_checks:
+  - type: issue_closed
+    params:
+      max_age_minutes: 5

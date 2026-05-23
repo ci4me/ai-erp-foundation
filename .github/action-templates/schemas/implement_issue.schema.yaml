@@ -1,0 +1,15 @@
+action: implement_issue
+required_markers:
+  - marker: "IMPLEMENTATION-COMPLETE"
+    allowed_values: ["TRUE", "FALSE", "FAILED"]
+required_sections:
+  - heading: "Implementation"
+    min_length: 50
+  - heading: "Changes made"
+    min_length: 20
+post_action_checks:
+  - type: pr_created
+    params:
+      head_branch_pattern: "feature/issue-{{issue.number}}"
+      fallback_branch_pattern: "issue-{{issue.number}}"
+      max_age_minutes: 30

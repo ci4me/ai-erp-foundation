@@ -1,0 +1,8 @@
+action: triage_issue
+required_markers:
+  - marker: "TRIAGE-DECISION"
+    allowed_values: [READY_FOR_AGENT, NEEDS_TRIAGE, BLOCKED, DEFER]
+required_sections:
+  - heading: "Triage summary"
+    min_length: 30
+post_action_checks: []

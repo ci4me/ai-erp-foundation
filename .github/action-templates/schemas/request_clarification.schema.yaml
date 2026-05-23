@@ -1,0 +1,8 @@
+action: request_clarification
+required_markers:
+  - marker: "CLARIFICATION-REQUEST"
+    allowed_values: [POSTED]
+required_sections:
+  - heading: "Please use one of"
+    min_length: 10
+post_action_checks: []
