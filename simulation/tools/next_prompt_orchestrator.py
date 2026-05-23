@@ -45,6 +45,11 @@ STALL_TRACKER = loop_speedup.StallTracker()
 MAX_RETRIES = 3
 STALE_DAYS = 7
 COT_REPEAT_SIMILARITY = 0.85
+
+# Discussion categories the loop scans for NEEDS-* markers and PLAN-REQUEST.
+# Adding `Announcements` lets release notes / status posts surface as
+# actionable work for the comment_discussion selector.
+DISCUSSION_CATEGORIES = ("General", "Ideas", "Announcements")
 DEFER_MARKER_RE = re.compile(r"(?im)^TRIAGE-DECISION:\s*DEFER\b")
 WAIT_FOR_HUMAN_LABELS = frozenset({"wait_for_human", "wait-for-human", "needs-human"})
 DESIGN_LOOP_MARKER_RE = re.compile(r"(?im)^DESIGN-APPROVAL:\s*REQUEST_CHANGES\b")
@@ -306,6 +311,56 @@ PLAN_READY_RE = re.compile(r"(?im)^PLAN-READY:\s*(POSTED|BLOCKED)\b")
 PROMOTION_COMPLETE_RE = re.compile(r"(?im)^PROMOTION-COMPLETE:\s*(POSTED|BLOCKED)\b")
 PLAN_APPROVE_RE = re.compile(r"(?im)^PLAN-APPROVE\b")
 PLAN_STATUS_RE = re.compile(r"(?im)^PLAN-STATUS:\s*(DRAFT|APPROVED|IMPLEMENTING|DONE|REJECTED)\b")
+
+
+STALE_MARKERLESS_DAYS = 7
+TRIGGER_MARKERS_RE = re.compile(
+    r"(?im)^(TEAM-REQUEST|PLAN-REQUEST|AUDIT-ISSUE|CREATE-ISSUE|PROMOTE-TO-ISSUE|TRIAGE-DECISION):"
+)
+
+
+def close_stale_markerless_issues(
+    open_issues: Iterable[dict[str, Any]],
+    *,
+    repo: str,
+    runner: lock_mod.GhRunner | None = None,
+    now: _dt.datetime | None = None,
+    days: int = STALE_MARKERLESS_DAYS,
+) -> list[int]:
+    """Auto-close issues that have been open without a trigger marker.
+
+    Walks ``open_issues`` and, for each that (a) lacks any trigger
+    marker in its body and (b) has not been touched in ``days`` days,
+    posts a ``STALE-ISSUE:`` comment and calls ``gh issue close``.
+    Returns the list of issue numbers that were closed so cron callers
+    can log it.
+
+    The trigger-marker regex matches the same set the loop's selectors
+    consult; an issue with any of those markers stays open even if
+    stale. This keeps the action limited to *truly* abandoned work.
+    """
+    run = runner or lock_mod._default_runner
+    moment = now or _now_utc()
+    closed: list[int] = []
+    for issue in open_issues:
+        body = issue.get("body") or ""
+        if TRIGGER_MARKERS_RE.search(body):
+            continue
+        updated = _parse_iso(issue.get("updatedAt") or issue.get("updated_at"))
+        if updated is None:
+            continue
+        if (moment - updated).days < days:
+            continue
+        number = str(issue.get("number") or "")
+        if not number:
+            continue
+        run(["issue", "comment", number, "--repo", repo, "--body",
+             f"STALE-ISSUE: No marker found for {days} days. Closing. "
+             f"Reopen with TEAM-REQUEST: if still relevant."])
+        run(["issue", "close", number, "--repo", repo,
+             "--reason", "not_planned"])
+        closed.append(int(number))
+    return closed
 
 
 def _planning_state(issue: dict[str, Any], proposed_action: str) -> "GuardDecision | None":
