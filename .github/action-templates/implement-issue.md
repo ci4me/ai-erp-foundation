@@ -3,6 +3,35 @@ id: implement-issue
 description: Implement a ready issue and open a PR
 ---
 
+## CRITICAL — STRICT CODE RULE (READ FIRST)
+
+This action exists to **ship real code**. Note-only and markdown-only
+PRs are rejected by `simulation.tools.validator.validate_pr_has_code`
+and the loop will refuse to merge them.
+
+- **Do NOT** open a PR that only changes `.md`, `.txt`, `.yml`,
+  `.json`, `.yaml` files unless the issue explicitly says "docs-only".
+- **Do NOT** open a PR whose only diff is a comment-only file like
+  `notes.md`, `TODO.md`, `implement-note.md`.
+- **Every PR must include at least one source file** with extension:
+  `.php`, `.js`, `.ts`, `.jsx`, `.tsx`, `.py`, `.go`, `.java`, `.rb`,
+  `.c`, `.cpp`, `.rs`, `.sql`. Add tests in the same language when the
+  project has a test suite.
+- **PR body must contain** `IMPLEMENTATION-COMPLETE: READY_FOR_REVIEW`
+  and a `Files changed:` list with paths.
+
+Example of a valid PR description:
+
+```
+IMPLEMENTATION-COMPLETE: READY_FOR_REVIEW
+
+Files changed:
+- src/Auth/User.php
+- tests/Auth/UserTest.php
+
+This PR implements JWT-based user authentication.
+```
+
 ## Action: Implement Issue #{{issue_number}}
 
 Persona: {{persona_name}} (`{{persona_id}}`)

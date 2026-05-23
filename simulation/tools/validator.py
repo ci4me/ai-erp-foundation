@@ -489,6 +489,65 @@ def validate_acceptance_criteria(issue_body: str, agent_output: str) -> tuple[bo
 _CHAIN_NEXT_RE = re.compile(r"^CHAIN-NEXT:\s*(?P<action>[a-z][a-z0-9_]+)\s*$", re.MULTILINE | re.IGNORECASE)
 
 
+CODE_FILE_EXTENSIONS = frozenset({
+    ".php", ".js", ".ts", ".jsx", ".tsx", ".py", ".go", ".java", ".rb",
+    ".c", ".cpp", ".cc", ".h", ".hpp", ".rs", ".sql", ".cs", ".kt", ".swift",
+})
+
+
+def validate_pr_has_code(
+    pr_number: int,
+    *,
+    repo: str = "ci4me/ai-erp-foundation",
+    gh_runner=None,
+) -> tuple[bool, str]:
+    """Return ``(ok, reason)``; ok=False blocks merge of note-only PRs.
+
+    Queries ``gh pr view <n> --repo <repo> --json files`` and accepts the
+    PR when at least one changed file has an extension in
+    :data:`CODE_FILE_EXTENSIONS`. ``gh_runner`` is injectable for tests;
+    when omitted we shell out via ``subprocess`` so the function works
+    inside the real loop.
+
+    Failure reasons are short and human-readable so the orchestrator
+    can include them in the rejection comment posted on the PR.
+    """
+    import json
+    import os
+    import subprocess as _sp
+
+    if gh_runner is None:
+        try:
+            result = _sp.run(
+                ["gh", "pr", "view", str(pr_number), "--repo", repo, "--json", "files"],
+                capture_output=True, text=True, check=False,
+            )
+            if result.returncode != 0:
+                return False, f"gh pr view failed: {result.stderr.strip()[:120]}"
+            payload = json.loads(result.stdout or "{}")
+        except (OSError, json.JSONDecodeError) as exc:
+            return False, f"could not inspect PR #{pr_number}: {exc}"
+    else:
+        payload = gh_runner(pr_number)
+
+    files = payload.get("files") or []
+    if not files:
+        return False, f"PR #{pr_number} has no changed files"
+
+    code_files = [
+        f for f in files
+        if os.path.splitext(f.get("path") or "")[1].lower() in CODE_FILE_EXTENSIONS
+    ]
+    if not code_files:
+        only = ", ".join(sorted({os.path.splitext(f.get("path") or "")[1] or "(no-ext)" for f in files}))
+        return (
+            False,
+            f"PR #{pr_number} has no source-code files — only {only}. "
+            "implement_issue PRs must include at least one .php/.js/.ts/.py/.go/etc. file.",
+        )
+    return True, f"{len(code_files)} code file(s) present"
+
+
 def extract_chain_next(body: str) -> str | None:
     """Return the action id requested by ``CHAIN-NEXT:`` or ``None``.
 
