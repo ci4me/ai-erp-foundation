@@ -1,0 +1,8 @@
+action: consistency_check
+required_markers:
+  - marker: "CONSISTENCY-CHECK"
+    allowed_values: [PASS, FIXED, BLOCKED]
+required_sections:
+  - heading: "Fixed"
+    min_length: 1
+post_action_checks: []

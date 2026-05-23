@@ -1,0 +1,8 @@
+action: design_solution
+required_markers:
+  - marker: "DESIGN-APPROVAL"
+    allowed_values: [APPROVE, REQUEST_CHANGES, BLOCKED]
+required_sections:
+  - heading: "Design document"
+    min_length: 100
+post_action_checks: []

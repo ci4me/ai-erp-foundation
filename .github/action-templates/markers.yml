@@ -1,0 +1,274 @@
+version: 0.2.0
+description: >
+  Marker registry for the autonomous-loop scheduler. Every catalog action that
+  posts to GitHub has exactly one primary state marker. Markers are parsed by
+  simulation/tools/validator.py and simulation/tools/marker_registry.py. The
+  enum in `values` is strict; anything else logs a warning and the marker is
+  treated as malformed.
+
+markers:
+  review_pr:
+    marker: REVIEW-VERDICT
+    values: [APPROVE, APPROVE_WITH_CONDITIONS, REQUEST_CHANGES, BLOCKED]
+    regex: '(?im)^REVIEW-VERDICT:\s*(APPROVE|APPROVE_WITH_CONDITIONS|REQUEST_CHANGES|BLOCKED)\b'
+    terminal: false
+    meaning: PR review verdict from a persona.
+    transitions:
+      APPROVE: merge_gate
+      APPROVE_WITH_CONDITIONS: merge_gate
+      REQUEST_CHANGES: address_changes_requested
+      BLOCKED: address_changes_requested
+
+  address_changes_requested:
+    marker: ADDRESS-CHANGES
+    values: [POSTED, BLOCKED]
+    regex: '(?im)^ADDRESS-CHANGES:\s*(POSTED|BLOCKED)\b'
+    terminal: false
+    meaning: Author replied to blocking review.
+
+  merge_gate:
+    marker: RHEA-VERDICT
+    values: [MERGE_READY, BLOCKED, HOLD]
+    regex: '(?im)^RHEA-VERDICT:\s*(MERGE_READY|BLOCKED|HOLD)\b'
+    terminal: false
+    meaning: Release-gate verdict from Rhea.
+
+  merge_pr:
+    marker: MERGE-STATUS
+    values: [COMPLETE, FAILED, SKIPPED]
+    regex: '(?im)^MERGE-STATUS:\s*(COMPLETE|FAILED|SKIPPED)\b'
+    terminal: false
+    meaning: Outcome of an attempted merge.
+    transitions:
+      COMPLETE: close_issue
+      FAILED: retry_merge
+      SKIPPED: post_status_and_exit
+
+  migrate_persona:
+    marker: PERSONA-MIGRATION
+    values: [PR_OPENED, BLOCKED]
+    regex: '(?im)^PERSONA-MIGRATION:\s*(PR_OPENED|BLOCKED)\b'
+    terminal: false
+    meaning: New persona prompt opened as a risk:high PR.
+
+  implement_scenario:
+    marker: SCENARIO-IMPLEMENTATION
+    values: [PR_OPENED, BLOCKED]
+    regex: '(?im)^SCENARIO-IMPLEMENTATION:\s*(PR_OPENED|BLOCKED)\b'
+    terminal: false
+    meaning: Missing scenario emitted as a PR.
+
+  triage_issue:
+    marker: TRIAGE-DECISION
+    values: [READY_FOR_AGENT, NEEDS_TRIAGE, BLOCKED, DEFER]
+    regex: '(?im)^TRIAGE-DECISION:\s*(READY_FOR_AGENT|NEEDS_TRIAGE|BLOCKED|DEFER)\b'
+    terminal: false
+    meaning: Issue triage verdict.
+
+  implement_issue:
+    marker: IMPLEMENTATION-COMPLETE
+    values: ["TRUE", "FALSE", "FAILED"]
+    regex: '(?im)^IMPLEMENTATION-COMPLETE:\s*(TRUE|FALSE|FAILED)\b'
+    terminal: false
+    meaning: Whether implementation produced an open PR.
+    transitions:
+      TRUE: review_pr
+      FALSE: address_changes_requested
+      FAILED: retry_implementation
+
+  prompt_improvement:
+    marker: PROMPT-PATCH
+    values: [PR_OPENED, BLOCKED]
+    regex: '(?im)^PROMPT-PATCH:\s*(PR_OPENED|BLOCKED)\b'
+    terminal: false
+    meaning: Prompt defect patched and opened as PR.
+
+  run_prompt_regression:
+    marker: VALIDATION-RESULT
+    values: [PASS, FAIL, SKIPPED]
+    regex: '(?im)^VALIDATION-RESULT:\s*(PASS|FAIL|SKIPPED)\b'
+    terminal: false
+    meaning: Outcome of a regression suite run.
+
+  run_audit:
+    marker: AUDIT-REPORT
+    values: [POSTED, BLOCKED]
+    regex: '(?im)^AUDIT-REPORT:\s*(POSTED|BLOCKED)\b'
+    terminal: false
+    meaning: Audit evidence posted on the issue.
+
+  security_audit:
+    marker: SECURITY-AUDIT
+    values: [POSTED, BLOCKED]
+    regex: '(?im)^SECURITY-AUDIT:\s*(POSTED|BLOCKED)\b'
+    terminal: false
+    meaning: Security threat model posted.
+
+  cost_review:
+    marker: COST-REVIEW
+    values: [POSTED, BLOCKED]
+    regex: '(?im)^COST-REVIEW:\s*(POSTED|BLOCKED)\b'
+    terminal: false
+    meaning: Cost review evidence posted.
+
+  comment_discussion:
+    marker: DISCUSSION-STATE
+    values: [OPEN, RESOLVED, PROMOTED, DEFERRED, CLOSED]
+    regex: '(?im)^DISCUSSION-STATE:\s*(OPEN|RESOLVED|PROMOTED|DEFERRED|CLOSED)\b'
+    terminal: false
+    meaning: Discussion lifecycle state after the comment.
+
+  generate_ideas:
+    marker: IDEAS-POSTED
+    values: ["TRUE", "FALSE"]
+    regex: '(?im)^IDEAS-POSTED:\s*(TRUE|FALSE)\b'
+    terminal: false
+    meaning: Idea batch posted in the Idea Lab.
+
+  promote_idea:
+    marker: IDEA-PROMOTION
+    values: [ISSUE_OPENED, BLOCKED]
+    regex: '(?im)^IDEA-PROMOTION:\s*(ISSUE_OPENED|BLOCKED)\b'
+    terminal: false
+    meaning: Idea promoted into a tracked issue.
+
+  open_followup_issue:
+    marker: FOLLOWUP-ISSUE
+    values: [OPENED, BLOCKED]
+    regex: '(?im)^FOLLOWUP-ISSUE:\s*(OPENED|BLOCKED)\b'
+    terminal: false
+    meaning: Follow-up issue created from a review/audit.
+
+  decision_record:
+    marker: DECISION-RECORDED
+    values: [POSTED]
+    regex: '(?im)^DECISION-RECORDED:\s*(POSTED)\b'
+    terminal: false
+    meaning: Decision record posted on a risk:high+ change.
+
+  retrospective:
+    marker: RETRO-FINDING
+    values: [POSTED]
+    regex: '(?im)^RETRO-FINDING:\s*(POSTED)\b'
+    terminal: false
+    meaning: Retrospective finding posted.
+
+  knowledge_update:
+    marker: KNOWLEDGE-UPDATE
+    values: [PR_OPENED, BLOCKED]
+    regex: '(?im)^KNOWLEDGE-UPDATE:\s*(PR_OPENED|BLOCKED)\b'
+    terminal: false
+    meaning: Durable doc/wiki update opened.
+
+  re_ratification:
+    marker: RERATIFICATION
+    values: [RATIFY, AMEND, ROLLBACK]
+    regex: '(?im)^RERATIFICATION:\s*(RATIFY|AMEND|ROLLBACK)\b'
+    terminal: false
+    meaning: Operating-model re-ratification outcome.
+
+  accept_pr:
+    marker: ACCEPTANCE-DECISION
+    values: [ACCEPT, HOLD, REJECT]
+    regex: '(?im)^ACCEPTANCE-DECISION:\s*(ACCEPT|HOLD|REJECT)\b'
+    terminal: false
+    meaning: Final acceptance decision before merge or reject.
+    transitions:
+      ACCEPT: merge_pr
+      HOLD: post_status_and_exit
+      REJECT: reject_pr
+
+  reject_pr:
+    marker: PR-STATE
+    values: [MERGED, REJECTED, CLOSED]
+    regex: '(?im)^PR-STATE:\s*(MERGED|REJECTED|CLOSED)\b'
+    terminal: true
+    meaning: Terminal PR state after close/merge.
+
+  create_issue:
+    marker: ISSUE-STATE
+    values: [CREATED, REOPENED]
+    regex: '(?im)^ISSUE-STATE:\s*(CREATED|REOPENED)\b'
+    terminal: false
+    meaning: A new (or reopened) tracked issue exists.
+
+  close_issue:
+    marker: ISSUE-CLOSED
+    values: [DONE, REJECTED, DUPLICATE, UNRESOLVED, TIMEOUT]
+    regex: '(?im)^ISSUE-CLOSED:\s*(DONE|REJECTED|DUPLICATE|UNRESOLVED|TIMEOUT)\b'
+    terminal: true
+    meaning: Issue closed with terminal reason.
+
+  create_milestone:
+    marker: MILESTONE-STATE
+    values: [CREATED, ASSIGNED, CLOSED]
+    regex: '(?im)^MILESTONE-STATE:\s*(CREATED|ASSIGNED|CLOSED)\b'
+    terminal: false
+    meaning: Milestone lifecycle transition.
+
+  assign_milestone:
+    marker: MILESTONE-ASSIGNMENT
+    values: [ASSIGNED, BLOCKED]
+    regex: '(?im)^MILESTONE-ASSIGNMENT:\s*(ASSIGNED|BLOCKED)\b'
+    terminal: false
+    meaning: Issue assigned to a milestone.
+
+  close_milestone:
+    marker: MILESTONE-CLOSED
+    values: [CLOSED, SKIPPED]
+    regex: '(?im)^MILESTONE-CLOSED:\s*(CLOSED|SKIPPED)\b'
+    terminal: true
+    meaning: Milestone closed because all issues are done.
+
+  post_status_and_exit:
+    marker: LOOP-STATUS
+    values: [NO_WORK, BLOCKED]
+    regex: '(?im)^LOOP-STATUS:\s*(NO_WORK|BLOCKED)\b'
+    terminal: false
+    meaning: Scheduler reports no actionable work this tick.
+
+  skip:
+    marker: LOOP-SKIP
+    values: [SATURATED, COOLDOWN]
+    regex: '(?im)^LOOP-SKIP:\s*(SATURATED|COOLDOWN)\b'
+    terminal: false
+    meaning: Loop deliberately skipped this tick.
+
+  design_solution:
+    marker: DESIGN-APPROVAL
+    values: [APPROVE, REQUEST_CHANGES, BLOCKED]
+    regex: '(?im)^DESIGN-APPROVAL:\s*(APPROVE|REQUEST_CHANGES|BLOCKED)\b'
+    terminal: false
+    meaning: Verdict on a design proposal.
+    transitions:
+      APPROVE: implement_issue
+      REQUEST_CHANGES: design_solution
+      BLOCKED: address_changes_requested
+
+  retry_implementation:
+    marker: RETRY-IMPLEMENTATION
+    values: [QUEUED, EXHAUSTED]
+    regex: '(?im)^RETRY-IMPLEMENTATION:\s*(QUEUED|EXHAUSTED)\b'
+    terminal: false
+    meaning: Implementation retry scheduled or exhausted.
+
+  retry_merge:
+    marker: RETRY-MERGE
+    values: [QUEUED, EXHAUSTED]
+    regex: '(?im)^RETRY-MERGE:\s*(QUEUED|EXHAUSTED)\b'
+    terminal: false
+    meaning: Merge retry scheduled or exhausted.
+
+  request_clarification:
+    marker: CLARIFICATION-REQUEST
+    values: [POSTED]
+    regex: '(?im)^CLARIFICATION-REQUEST:\s*(POSTED)\b'
+    terminal: false
+    meaning: Unknown marker triggered a clarification ask.
+
+  consistency_check:
+    marker: CONSISTENCY-CHECK
+    values: [PASS, FIXED, BLOCKED]
+    regex: '(?im)^CONSISTENCY-CHECK:\s*(PASS|FIXED|BLOCKED)\b'
+    terminal: false
+    meaning: Outcome of the cross-state consistency sweep.

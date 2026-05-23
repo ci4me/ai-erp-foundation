@@ -1,0 +1,14 @@
+action: retry_implementation
+required_markers:
+  - marker: "RETRY-IMPLEMENTATION"
+    allowed_values: [QUEUED, EXHAUSTED]
+required_sections:
+  - heading: "Last failure"
+    min_length: 10
+  - heading: "Narrow fix"
+    min_length: 20
+post_action_checks:
+  - type: pr_created
+    params:
+      head_branch_pattern: "feature/issue-{{issue.number}}-retry"
+      max_age_minutes: 30

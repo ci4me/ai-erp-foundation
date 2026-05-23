@@ -1,0 +1,11 @@
+action: merge_pr
+required_markers:
+  - marker: "MERGE-STATUS"
+    allowed_values: [COMPLETE, FAILED, SKIPPED]
+required_sections:
+  - heading: "Merge summary"
+    min_length: 20
+post_action_checks:
+  - type: pr_merged
+    params:
+      require_merge_commit_sha: true
