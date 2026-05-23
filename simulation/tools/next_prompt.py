@@ -73,8 +73,12 @@ class RepoState:
 
 def _gh(args: list[str], repo: str) -> str:
     """Run a gh CLI subcommand; raise on non-zero. Returns stdout."""
+    command = ["gh", *args]
+    if args and args[0] != "api":
+        command.extend(["-R", repo])
+
     result = subprocess.run(
-        ["gh", *args, "-R", repo],
+        command,
         capture_output=True, text=True, check=False,
     )
     if result.returncode != 0:
