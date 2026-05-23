@@ -17,6 +17,57 @@ The goal is mechanical execution. Follow the numbered steps in order. When you f
 
 {{hard_caps}}
 
+## Chain of Thought (REQUIRED — length depends on task complexity)
+
+Before writing your final output, produce a numbered ``**Reasoning:**``
+block. The minimum length is set by task complexity — the renderer fills in
+the actual numbers via the variables below:
+
+- **Trivial tasks** (label ``trivial`` or quick fix): at least 2 steps,
+  5 words each.
+- **Medium tasks** (default): at least 3 steps, 8 words each.
+- **Complex tasks** (label ``complex``, ``risk:high``, ``risk:critical`` or
+  keywords like *architecture*, *database*, *api*, *security*): at least
+  5 steps, 12 words each.
+
+### Step template (pick the ones that apply)
+
+1. **Restate the goal** — what must be achieved?
+2. **Review context** — constraints, previous decisions, current state.
+3. **List alternatives** — at least 2 possible approaches (if applicable).
+4. **Plan the work** — break down what you will output.
+5. **Risks & mitigation** — what could go wrong and how to avoid it.
+6. **Dependencies** — external libraries or changes elsewhere.
+7. **Testing strategy** — how will you verify correctness?
+
+### Output format
+
+```
+**Reasoning:**
+1. [step 1]
+2. [step 2]
+...
+
+<your normal output here, ending with the required marker>
+```
+
+Do **not** repeat the issue body inside reasoning steps — refer to it by
+identifier or section name.
+
+## Token-discipline rules (NON-NEGOTIABLE)
+
+- **Do not quote or repeat** the issue title, description, or earlier comments
+  unless explicitly asked. Focus your output on new content only.
+- Before replying, **read the decision log** at the bottom of the issue body
+  (`<!-- DECISIONS: ... -->`). Never contradict an accepted decision; if you
+  must, emit `REOPEN-DECISION: <key>` first and stop.
+- If this is a follow-up to a previous design or implementation, **output only
+  the delta**: added sections, modified lines, removed items. Do not re-emit
+  the unchanged parts.
+- For PR diffs larger than 200 lines, **do not request the full diff**. Read
+  the file list first (`gh pr view --json files`), pick the suspicious files,
+  and read only those.
+
 ## Posting Mode
 
 This prompt was rendered with `post_mode={{post_mode}}`.

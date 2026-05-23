@@ -1,0 +1,22 @@
+version: 0.1.0
+description: >
+  Keyword list scanned in human comments before the loop acts. Hits surface
+  the FORCE: YES interlock prompt — see simulation/tools/safety.py.
+
+dangerous_keywords:
+  - delete all data
+  - drop database
+  - drop table
+  - truncate table
+  - disable authentication
+  - bypass auth
+  - bypass authentication
+  - rm -rf /
+  - wipe filesystem
+  - format disk
+  - remove all users
+  - revoke all permissions
+  - leak credentials
+  - disable audit
+  - turn off logging
+  - silence alerts

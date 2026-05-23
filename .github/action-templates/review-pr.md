@@ -85,6 +85,21 @@ Read only after you have built your own claim list from the diff.
 {{pr_body}}
 ```
 
+## Review Chain of Thought
+
+Before writing your verdict, review the implementer's most recent
+``**Reasoning:**`` block (and any CoT entries stored as
+``<!-- COT: ... -->`` comments in the issue body) and answer:
+
+1. Did the implementer follow their own plan? (Yes/No + one-line evidence)
+2. Are all claimed changes actually present in the PR diff?
+3. Are tests included and passing?
+4. Any missing edge cases not covered by the reasoning?
+
+Cite the implementer's step numbers in your verdict (e.g., "step 3 missing").
+A reviewer CoT that does not reference at least one implementer step will be
+rejected by ``simulation.tools.validator.validate_cot``.
+
 ## Step-by-step execution
 
 ### Step 1: Set shell variables

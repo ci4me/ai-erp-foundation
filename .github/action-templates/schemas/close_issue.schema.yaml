@@ -1,7 +1,7 @@
 action: close_issue
 required_markers:
   - marker: "ISSUE-CLOSED"
-    allowed_values: [DONE, REJECTED, DUPLICATE, UNRESOLVED, TIMEOUT]
+    allowed_values: [DONE, REJECTED, DUPLICATE, UNRESOLVED, TIMEOUT, INACTIVE]
 required_sections:
   - heading: "Close reason"
     min_length: 20

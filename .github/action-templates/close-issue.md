@@ -3,6 +3,11 @@ id: close-issue
 description: Close an issue after explicit accepted/rejected/done state
 ---
 
+## TL;DR
+
+Close this issue by commenting `ISSUE-CLOSED: {{issue_close_reason}}` with a
+one-line summary. Do not add any other text.
+
 ## Action: Close Issue #{{issue_number}}
 
 Persona: {{persona_name}} (`{{persona_id}}`)

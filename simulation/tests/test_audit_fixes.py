@@ -423,7 +423,7 @@ def test_unknown_marker_twice_closes_issue_as_unresolved():
         88,
         comments=[
             "WIDGET-VERDICT: YES — first attempt",
-            "still WIDGET-VERDICT: YES second time",
+            "WIDGET-VERDICT: YES — second time, still unresolved",
         ],
     )
     decision = orch.check_locks_and_cycles(

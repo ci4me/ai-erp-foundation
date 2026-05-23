@@ -1,0 +1,28 @@
+version: 0.1.0
+description: >
+  Maps approval-team names used in the loop to real GitHub team IDs. If a
+  team is missing, the orchestrator logs a warning and skips the requirement
+  for that review.
+
+teams:
+  release:
+    github_team: ci4me/release
+    members: [rhea-release-manager]
+  security:
+    github_team: ci4me/security
+    members: [iris-security]
+  architecture:
+    github_team: ci4me/architecture
+    members: [theo-architect, vera-risk-officer]
+  product:
+    github_team: ci4me/product
+    members: [mara-product-owner]
+
+required_reviewers:
+  risk:critical: [security, architecture, release]
+  risk:high: [architecture, release]
+  risk:medium: [architecture]
+  risk:low: []
+
+reviewer_timeout_hours: 48
+on_timeout: proceed_with_simple_majority
