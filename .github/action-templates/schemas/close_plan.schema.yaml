@@ -1,0 +1,8 @@
+action: close_plan
+required_markers:
+  - marker: "RELEASE-NOTES"
+    allowed_values: [POSTED, BLOCKED]
+required_sections:
+  - heading: "Steps"
+    min_length: 30
+post_action_checks: []

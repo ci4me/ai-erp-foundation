@@ -1,0 +1,8 @@
+action: verify_implementation
+required_markers:
+  - marker: "AC-DONE"
+    allowed_values: [ALL, PARTIAL, FAILED]
+required_sections:
+  - heading: "Steps"
+    min_length: 30
+post_action_checks: []

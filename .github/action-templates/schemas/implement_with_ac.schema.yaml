@@ -1,0 +1,10 @@
+action: implement_with_ac
+required_markers:
+  - marker: "AC-COVERAGE"
+    allowed_values: [POSTED, BLOCKED]
+required_sections:
+  - heading: "Acceptance criteria coverage"
+    min_length: 30
+  - heading: "Testing performed"
+    min_length: 20
+post_action_checks: []

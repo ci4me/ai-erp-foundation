@@ -1,0 +1,8 @@
+action: facilitate_planning
+required_markers:
+  - marker: "PLAN-READY"
+    allowed_values: [POSTED, BLOCKED]
+required_sections:
+  - heading: "Steps"
+    min_length: 30
+post_action_checks: []

@@ -295,6 +295,72 @@ def verify_pr_exists_for_merge(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Planning-first state machine.
+# ---------------------------------------------------------------------------
+
+
+PLAN_REQUEST_RE = re.compile(r"(?im)^PLAN-REQUEST:\s*\S")
+PLAN_SUMMARY_RE = re.compile(r"(?im)^PLAN-SUMMARY:\s*\S")
+PLAN_READY_RE = re.compile(r"(?im)^PLAN-READY:\s*(POSTED|BLOCKED)\b")
+PROMOTION_COMPLETE_RE = re.compile(r"(?im)^PROMOTION-COMPLETE:\s*(POSTED|BLOCKED)\b")
+PLAN_APPROVE_RE = re.compile(r"(?im)^PLAN-APPROVE\b")
+PLAN_STATUS_RE = re.compile(r"(?im)^PLAN-STATUS:\s*(DRAFT|APPROVED|IMPLEMENTING|DONE|REJECTED)\b")
+
+
+def _planning_state(issue: dict[str, Any], proposed_action: str) -> "GuardDecision | None":
+    """Drive the planning-first workflow when planning markers are present.
+
+    Returns a ``GuardDecision`` that overrides the loop's normal action
+    selection, or ``None`` when the issue is not in a planning state.
+
+    Transitions, in priority order:
+
+    - body has ``PLAN-REQUEST:`` and no ``PLAN-SUMMARY:``
+      → override to ``facilitate_planning``.
+    - body has ``PLAN-READY: POSTED`` and no ``PROMOTION-COMPLETE``
+      → override to ``promote_to_issues``.
+    - any comment carries ``PLAN-APPROVE`` and body has
+      ``PLAN-STATUS: DRAFT`` → override to ``validate_plan``.
+    - body has ``PLAN-STATUS: APPROVED`` → override to
+      ``implement_with_ac``.
+    """
+    body = (issue.get("body") or "")
+    comments = issue.get("comments") or []
+    comments_text = "\n".join(c.get("body") or "" for c in comments)
+    full = body + "\n" + comments_text
+
+    has_plan_request = bool(PLAN_REQUEST_RE.search(full))
+    has_plan_summary = bool(PLAN_SUMMARY_RE.search(full))
+    has_plan_ready = bool(PLAN_READY_RE.search(full))
+    has_promotion = bool(PROMOTION_COMPLETE_RE.search(full))
+    has_plan_approve = bool(PLAN_APPROVE_RE.search(comments_text))
+    plan_status_match = PLAN_STATUS_RE.search(body)
+    plan_status = plan_status_match.group(1).upper() if plan_status_match else None
+
+    if has_plan_request and not has_plan_summary:
+        return GuardDecision(
+            action_override="facilitate_planning",
+            reason="planning:needs_summary",
+        )
+    if has_plan_ready and not has_promotion:
+        return GuardDecision(
+            action_override="promote_to_issues",
+            reason="planning:ready_for_promotion",
+        )
+    if plan_status == "DRAFT" and has_plan_approve:
+        return GuardDecision(
+            action_override="validate_plan",
+            reason="planning:human_approved_draft",
+        )
+    if plan_status == "APPROVED" and proposed_action not in {"implement_with_ac", "close_issue"}:
+        return GuardDecision(
+            action_override="implement_with_ac",
+            reason="planning:approved_pending_impl",
+        )
+    return None
+
+
 def check_locks_and_cycles(
     *,
     repo: str,
@@ -424,6 +490,11 @@ def check_locks_and_cycles(
             abort=True,
             reason=f"dedupe:{persona_id}:{target_id}:{proposed_action}",
         )
+
+    # 0i. Planning-first workflow guards.
+    plan_decision = _planning_state(issue, proposed_action)
+    if plan_decision is not None:
+        return plan_decision
 
     # 1. Quick-fix bypass for trivial TEAM-REQUESTs.
     if proposed_action in {"triage_issue", "design_solution"} and optimization.quick_fix_bypass(issue):
