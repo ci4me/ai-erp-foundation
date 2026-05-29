@@ -91,7 +91,7 @@ ACTION_PATTERNS: dict[str, list[tuple[str, str]]] = {
         ("acceptance criteria", r"(?im)^\s*##\s+Acceptance criteria\b"),
     ],
     "open_issue": [
-        ("issue opened marker", r"(?im)^\s*ISSUE-STATE:\s*OPENED\b"),
+        ("issue opened marker", r"(?im)^\s*ISSUE-OPENED:\s*OPENED\b"),
         ("source section", r"(?im)^\s*##\s+Source\b"),
         ("acceptance criteria", r"(?im)^\s*##\s+Acceptance criteria\b"),
     ],
@@ -100,7 +100,7 @@ ACTION_PATTERNS: dict[str, list[tuple[str, str]]] = {
         ("close reason", r"(?im)^\s*\*\*Close reason:\*\*\s*(completed|not_planned|duplicate)\b"),
     ],
     "reopen_issue": [
-        ("issue reopen marker", r"(?im)^\s*ISSUE-STATE:\s*REOPENED\b"),
+        ("issue reopen marker", r"(?im)^\s*ISSUE-REOPENED:\s*REOPENED\b"),
         ("reason", r"(?im)^\s*\*\*Reason:\*\*\s*[^\n]+"),
     ],
     "merge_gate": [
@@ -252,11 +252,11 @@ def infer_action(body: str, *, github_event_name: str | None = None, is_pr: bool
         return "reject_pr"
     if re.search(r"(?im)^\s*ISSUE-STATE:\s*CREATED\b", body):
         return "create_issue"
-    if re.search(r"(?im)^\s*ISSUE-STATE:\s*OPENED\b", body):
+    if re.search(r"(?im)^\s*ISSUE-OPENED:\s*OPENED\b", body):
         return "open_issue"
     if re.search(r"(?im)^\s*ISSUE-STATE:\s*CLOSED\b", body):
         return "close_issue"
-    if re.search(r"(?im)^\s*ISSUE-STATE:\s*REOPENED\b", body):
+    if re.search(r"(?im)^\s*ISSUE-REOPENED:\s*REOPENED\b", body):
         return "reopen_issue"
     if re.search(r"(?im)^\s*DISCUSSION-STATE:\s*(PROMOTED|REJECTED|CLOSED|RESOLVED|ANSWERED|SUPERSEDED)\b", body):
         return "close_discussion"

@@ -44,14 +44,15 @@ COLLABORATION_TEMPLATES = [
     "record_adr.md", "explain.md", "reach_consensus.md",
     "decompose_feature.md", "create_sub_issues.md",
     "run_tests.md", "phase_gate.md", "acceptance_review.md",
-    "rework_from_rejection.md",
+    "rework_from_rejection.md", "triage_test_failures.md",
 ]
 # Problem types that must be wired into the planner's analyzer.
 REQUIRED_DETECTORS = [
     "UNANSWERED_REQUEST", "REVIEW_DEADLOCK", "UNANSWERED_REQUEST_INFO",
     "UNRESOLVED_DEBATE", "MISSING_EXPLANATION", "UNRECORDED_ADR",
     "EPIC_UNDECOMPOSED", "SUBTASKS_NOT_CREATED", "BLOCKED_BY_DEPENDENCY",
-    "PHASE_GATE_READY", "TESTING_REQUIRED", "ACCEPTANCE_REQUIRED", "ACCEPTANCE_BLOCKED",
+    "PHASE_GATE_READY", "TESTING_REQUIRED", "TESTING_FAILED",
+    "ACCEPTANCE_REQUIRED", "ACCEPTANCE_BLOCKED",
 ]
 
 
@@ -159,8 +160,8 @@ def audit_production_readiness() -> bool:
     for needed in (
         "MISSING_EXPLANATION", "UNRECORDED_ADR", "UNRESOLVED_DEBATE",
         "EPIC_UNDECOMPOSED", "SUBTASKS_NOT_CREATED",
-        "PHASE_GATE_READY", "TESTING_REQUIRED", "ACCEPTANCE_REQUIRED",
-        "ACCEPTANCE_BLOCKED",
+        "PHASE_GATE_READY", "TESTING_REQUIRED", "TESTING_FAILED",
+        "ACCEPTANCE_REQUIRED", "ACCEPTANCE_BLOCKED",
     ):
         if needed not in plan_builder._FIXERS:
             print(f"❌ plan_builder has no fixer for {needed}.")

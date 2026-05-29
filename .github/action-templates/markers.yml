@@ -199,6 +199,27 @@ markers:
     terminal: true
     meaning: Issue closed with terminal reason.
 
+  open_issue:
+    marker: ISSUE-OPENED
+    values: [OPENED]
+    regex: '(?im)^ISSUE-OPENED:\s*OPENED\b'
+    terminal: false
+    meaning: A new bounded issue was opened from an explicit request.
+
+  reopen_issue:
+    marker: ISSUE-REOPENED
+    values: [REOPENED]
+    regex: '(?im)^ISSUE-REOPENED:\s*REOPENED\b'
+    terminal: false
+    meaning: A previously-closed issue was reopened with new evidence.
+
+  request_review:
+    marker: REVIEW-REQUEST
+    values: []
+    regex: '(?im)^REVIEW-REQUEST:\s*(human|[a-z0-9][a-z0-9-]+)\b'
+    terminal: false
+    meaning: An additional reviewer (persona or human) was formally requested on a PR.
+
   create_milestone:
     marker: MILESTONE-STATE
     values: [CREATED, ASSIGNED, CLOSED]

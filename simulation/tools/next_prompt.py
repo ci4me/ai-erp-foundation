@@ -142,21 +142,39 @@ from simulation.tools.lesson_repository import (
 from simulation.tools.lesson_injector import LessonInjector
 from simulation.tools.retrospective import Retrospective
 
-# Compatibility re-exports: callers such as simulation.tools.action_coverage
-# treat this facade as the public API. These names live in next_prompt_legacy
-# while the extract-models-config refactor is in progress; surfacing them here
-# keeps the coverage tooling (and its test) working against next_prompt.*.
-from simulation.tools.next_prompt_validation import validate_static_config  # noqa: E402,F401
+# Compatibility re-exports: callers such as simulation.tools.action_coverage and
+# the test suite treat this facade as the public API. These names live in
+# next_prompt_legacy while the extract-models-config refactor is in progress;
+# surfacing them here keeps the coverage tooling and tests working against
+# next_prompt.* (closes audit gap G3).
+from simulation.tools.next_prompt_validation import (  # noqa: E402,F401
+    validate_rendered_prompt,
+    validate_static_config,
+)
 from simulation.tools.next_prompt_legacy import (  # noqa: E402,F401
     ACTION_TEMPLATES_DIR,
     REPO_ROOT,
+    RepoState,
     _as_list,
+    _discussion_has_terminal_marker,
+    _discussion_variables,
+    _extract_verdict,
+    _find_closable_issue,
+    _find_closable_milestone,
+    _has_any_marker,
+    _issue_lifecycle_variables,
     _load_action_catalog,
     _load_persona_index,
     _normalize_persona_token,
+    _parse_required_reviewers,
     _persona_aliases,
+    _persona_catalog,
+    _policy_required_reviewers,
+    _render_template,
+    _review_history,
     _scenario_catalog,
     _template_name_for_action,
+    resolve_priority,
 )
 
 
