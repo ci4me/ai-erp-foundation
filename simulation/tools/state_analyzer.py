@@ -299,6 +299,55 @@ def _blocked(item: dict[str, Any]) -> bool:
     return re.search(r"(?im)^\s*ACCEPTANCE-DECISION:\s*Blocked\b", joined) is not None
 
 
+def latest_acceptance_decision(item: dict[str, Any]) -> str | None:
+    """Return the *most recent* ACCEPTANCE-DECISION value (Approved/Blocked), or None.
+
+    Body and comments are scanned in chronological order, so this resolves the
+    rejection→rework→re-accept loop correctly: a fresh ``Approved`` after an
+    earlier ``Blocked`` reads as Approved, and vice-versa.
+    """
+    latest: str | None = None
+    for text in _texts(item):
+        for m in re.finditer(
+            r"(?im)^\s*ACCEPTANCE-DECISION:\s*(Approved|Blocked)\b", text
+        ):
+            latest = m.group(1)
+    return latest
+
+
+def extract_rejection_reason(item: dict[str, Any]) -> str:
+    """Extract the reason text from the latest ``ACCEPTANCE-DECISION: Blocked (...)``.
+
+    Accepts both ``Blocked (reason: ...)`` and ``Blocked (...)`` forms; returns
+    "" when no parenthetical reason is given.
+    """
+    reason = ""
+    for text in _texts(item):
+        for m in re.finditer(
+            r"(?im)^\s*ACCEPTANCE-DECISION:\s*Blocked\b[^\n(]*(?:\(\s*(?:reason:\s*)?([^)]*)\))?",
+            text,
+        ):
+            if m.group(1):
+                reason = m.group(1).strip()
+    return reason
+
+
+def rework_target_phase(reason: str | None) -> str:
+    """Map a rejection reason to the phase the epic should return to.
+
+    scope/design → planning · test/coverage/bug → testing ·
+    implementation/quality/code → implementation · unclear → planning.
+    """
+    r = (reason or "").lower()
+    if any(k in r for k in ("scope", "design", "requirement", "spec")):
+        return PHASE_LABELS["planning"]
+    if any(k in r for k in ("test", "coverage", "bug", "regression")):
+        return PHASE_LABELS["testing"]
+    if any(k in r for k in ("implement", "quality", "code", "refactor")):
+        return PHASE_LABELS["implementation"]
+    return PHASE_LABELS["planning"]
+
+
 def _has_test_report_pass(item: dict[str, Any]) -> bool:
     joined = "\n".join(_texts(item))
     return re.search(r"(?im)^\s*TEST-REPORT:\s*Pass\b", joined) is not None
@@ -379,7 +428,9 @@ def phase_gate_ready(state: dict[str, Any], epic: dict[str, Any]) -> str | None:
     elif current == PHASE_LABELS["testing"]:
         ready = _has_test_report_pass(epic)
     elif current == PHASE_LABELS["acceptance"]:
-        ready = _approved(epic)
+        # Done only when the *latest* decision is Approved; a standing Blocked
+        # (not yet reworked) suppresses the transition.
+        ready = latest_acceptance_decision(epic) == "Approved"
     else:
         ready = False
     return nxt if ready else None
@@ -647,13 +698,16 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
 
         # Priority 3: acceptance phase needs a human approval request posted.
         if phase == PHASE_LABELS["acceptance"]:
-            if _blocked(issue):
+            if latest_acceptance_decision(issue) == "Blocked":
+                reason = extract_rejection_reason(issue)
                 problems.append(
                     {
                         "type": "ACCEPTANCE_BLOCKED",
                         "priority": 1,
                         "target": {"type": "issue", "number": issue["number"]},
                         "data": issue,
+                        "rejection_reason": reason,
+                        "rework_target": rework_target_phase(reason),
                     }
                 )
             elif not _has_approval_request(issue):

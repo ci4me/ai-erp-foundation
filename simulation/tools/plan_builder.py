@@ -705,6 +705,38 @@ def fix_testing_required(problem: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def fix_acceptance_blocked(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Route a human-blocked epic back to the correct phase for rework (G1)."""
+    num = problem["target"]["number"]
+    lead = _lead_persona()
+    reason = problem.get("rejection_reason") or "unspecified"
+    target = problem.get("rework_target") or "phase/planning"
+    reasoning = [
+        f"Epic #{num} was Blocked at acceptance (reason: {reason}).",
+        f"Routing it back to {target} so the team can address the rejection.",
+    ]
+    rendered = _render_template(
+        "rework_from_rejection.md",
+        issue_number=num,
+        reason=reason,
+        target_phase=target,
+    )
+    markers = [
+        rendered,
+        "",
+        f"PHASE-CHANGE: phase/acceptance -> {target} "
+        f"(reason: ACCEPTANCE-DECISION: Blocked — {reason})",
+    ]
+    return [
+        {
+            "persona": lead,
+            "action": "comment_issue",
+            "target": {"type": "issue", "number": num},
+            "body": _compose_body(lead, reasoning, markers),
+        }
+    ]
+
+
 def fix_acceptance_required(problem: dict[str, Any]) -> list[dict[str, Any]]:
     """Request human sign-off for an epic that passed testing."""
     num = problem["target"]["number"]
@@ -726,9 +758,9 @@ def fix_acceptance_required(problem: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-# Dispatch table: problem type -> fixer. BLOCKED_BY_DEPENDENCY and
-# ACCEPTANCE_BLOCKED are intentionally absent — they are informational and
-# instead suppress other work / wait for a human (see build_plan).
+# Dispatch table: problem type -> fixer. BLOCKED_BY_DEPENDENCY is intentionally
+# absent — it is informational and instead suppresses other work (see build_plan).
+# ACCEPTANCE_BLOCKED now has a fixer (G1): it routes the epic back for rework.
 _FIXERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "UNANSWERED_REQUEST": handle_unanswered_request,
     "REVIEW_DEADLOCK": fix_review_deadlock,
@@ -740,6 +772,7 @@ _FIXERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "PHASE_GATE_READY": fix_phase_gate_ready,
     "TESTING_REQUIRED": fix_testing_required,
     "ACCEPTANCE_REQUIRED": fix_acceptance_required,
+    "ACCEPTANCE_BLOCKED": fix_acceptance_blocked,
     "EMPTY_PR": fix_empty_pr,
     "MISSING_MARKER": fix_missing_marker,
     "TRIVIAL_NOT_IMPLEMENTED": implement_trivial_issue,
