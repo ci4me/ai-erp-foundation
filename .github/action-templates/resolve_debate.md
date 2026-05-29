@@ -3,7 +3,14 @@
 As {{ persona }}, review the entire debate thread on Discussion
 #{{ target_number }}.
 
-If a clear consensus has emerged, post:
+**Prefer consensus.** If at least two distinct personas have expressed clear
+agreement, post the strongest resolution — a multi-persona consensus:
+
+```
+CONSENSUS-REACHED: <decision> (signees: @persona1, @persona2)
+```
+
+Otherwise, if a clear decision has emerged that you can own alone, post:
 
 ```
 RESOLUTION: <decision> (approved by {{ persona }})
