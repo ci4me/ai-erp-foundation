@@ -453,3 +453,27 @@ collaboration_markers:
     regex: '(?im)^DECOMPOSITION-PLAN:'
     terminal: false
     meaning: A plan listing at least two SUB-TASK items for an epic.
+
+  TEST-REPORT:
+    marker: TEST-REPORT
+    regex: '(?im)^TEST-REPORT:\s*(Pass|Fail)\b'
+    terminal: false
+    meaning: Test-suite result for an epic in the testing phase (Pass or Fail).
+
+  PHASE-CHANGE:
+    marker: PHASE-CHANGE
+    regex: '(?im)^PHASE-CHANGE:\s*\S.*'
+    terminal: false
+    meaning: Records a phase transition (from -> to) for the lifecycle audit log.
+
+# Phase-lifecycle labels (single source of phase truth). These are GitHub label
+# names, not body markers — referenced by simulation/tools/state_analyzer for
+# the five-phase feature lifecycle (Planning -> Implementation -> Testing ->
+# Acceptance -> Done). REQUEST-APPROVAL-FROM (a request marker) doubles as the
+# human approval gate at the end of Planning and before Done.
+phase_labels:
+  planning: "phase/planning"
+  implementation: "phase/implementation"
+  testing: "phase/testing"
+  acceptance: "phase/acceptance"
+  done: "phase/done"

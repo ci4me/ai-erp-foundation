@@ -609,8 +609,126 @@ def fix_subtasks_not_created(problem: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-# Dispatch table: problem type -> fixer. BLOCKED_BY_DEPENDENCY is intentionally
-# absent — it is informational and instead suppresses other work (see build_plan).
+# Problem types admissible while an issue carries a given phase label. Phase
+# management problems (PHASE_GATE_READY etc.) are self-gated by the analyzer but
+# listed here so they survive the filter. Conversation problems are allowed in
+# every phase. An issue with no phase label bypasses this filter entirely.
+_PHASE_ALLOWED_PROBLEMS: dict[str, set[str]] = {
+    "phase/planning": {
+        "EPIC_UNDECOMPOSED", "UNRESOLVED_DEBATE", "MISSING_MARKER",
+        "PHASE_GATE_READY", "UNRECORDED_ADR",
+    },
+    "phase/implementation": {
+        "SUBTASKS_NOT_CREATED", "TRIVIAL_NOT_IMPLEMENTED", "EMPTY_PR",
+        "UNREVIEWED_PR", "REVIEW_DEADLOCK", "MISSING_EXPLANATION",
+        "PHASE_GATE_READY",
+    },
+    "phase/testing": {"TESTING_REQUIRED", "MISSING_EXPLANATION", "PHASE_GATE_READY"},
+    "phase/acceptance": {"ACCEPTANCE_REQUIRED", "ACCEPTANCE_BLOCKED", "PHASE_GATE_READY"},
+    "phase/done": set(),
+}
+# Always allowed regardless of phase — these advance multi-agent conversation.
+_PHASE_AGNOSTIC_PROBLEMS = {
+    "UNANSWERED_REQUEST", "UNANSWERED_REQUEST_INFO",
+}
+
+
+def _phase_allows(problem: dict[str, Any]) -> bool:
+    """True iff the problem may be acted on given its target issue's phase label."""
+    from simulation.tools.state_analyzer import get_current_phase
+
+    data = problem.get("data")
+    if not isinstance(data, dict):
+        return True
+    phase = get_current_phase(data)
+    if phase is None:
+        return True  # non-lifecycle issue: unconstrained
+    if problem["type"] in _PHASE_AGNOSTIC_PROBLEMS:
+        return True
+    return problem["type"] in _PHASE_ALLOWED_PROBLEMS.get(phase, set())
+
+
+def _test_lead_persona() -> str:
+    """The Test Lead persona (tessa by default), else the run_prompt_regression owner."""
+    reg = _get_registry()
+    if reg.get_persona("tessa-test-lead"):
+        return "tessa-test-lead"
+    return reg.get_persona_for_action("run_prompt_regression")
+
+
+def _product_owner_persona() -> str:
+    """The Product Owner persona (mara by default), else the Lead."""
+    if _get_registry().get_persona("mara-product-owner"):
+        return "mara-product-owner"
+    return _lead_persona()
+
+
+def fix_phase_gate_ready(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Advance an epic to the next phase once its exit criteria are met."""
+    num = problem["target"]["number"]
+    current = problem.get("current_phase", "")
+    nxt = problem.get("next_phase", "")
+    lead = _lead_persona()
+    reasoning = [
+        f"Epic #{num} has met every exit criterion for {current}.",
+        f"Applying the {nxt} label, removing {current}, and logging PHASE-CHANGE.",
+    ]
+    rendered = _render_template(
+        "phase_gate.md", issue_number=num, current_phase=current, next_phase=nxt
+    )
+    return [
+        {
+            "persona": lead,
+            "action": "comment_issue",
+            "target": {"type": "issue", "number": num},
+            "body": _compose_body(lead, reasoning, [rendered]),
+        }
+    ]
+
+
+def fix_testing_required(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Run the test suite for an epic that entered the testing phase."""
+    num = problem["target"]["number"]
+    tester = _test_lead_persona()
+    reasoning = [
+        f"Epic #{num} is in phase/testing with no TEST-REPORT yet.",
+        "Running the suite and reporting Pass/Fail.",
+    ]
+    rendered = _render_template("run_tests.md", persona=tester, issue_number=num)
+    return [
+        {
+            "persona": tester,
+            "action": "comment_issue",
+            "target": {"type": "issue", "number": num},
+            "body": _compose_body(tester, reasoning, [rendered]),
+        }
+    ]
+
+
+def fix_acceptance_required(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Request human sign-off for an epic that passed testing."""
+    num = problem["target"]["number"]
+    owner = _product_owner_persona()
+    reasoning = [
+        f"Epic #{num} is in phase/acceptance with no approval request posted.",
+        "Requesting final human sign-off; the planner waits for the decision.",
+    ]
+    rendered = _render_template(
+        "acceptance_review.md", persona=owner, issue_number=num, approver="product-owner"
+    )
+    return [
+        {
+            "persona": owner,
+            "action": "comment_issue",
+            "target": {"type": "issue", "number": num},
+            "body": _compose_body(owner, reasoning, [rendered]),
+        }
+    ]
+
+
+# Dispatch table: problem type -> fixer. BLOCKED_BY_DEPENDENCY and
+# ACCEPTANCE_BLOCKED are intentionally absent — they are informational and
+# instead suppress other work / wait for a human (see build_plan).
 _FIXERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "UNANSWERED_REQUEST": handle_unanswered_request,
     "REVIEW_DEADLOCK": fix_review_deadlock,
@@ -619,6 +737,9 @@ _FIXERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "UNRECORDED_ADR": fix_unrecorded_adr,
     "EPIC_UNDECOMPOSED": fix_epic_undecomposed,
     "SUBTASKS_NOT_CREATED": fix_subtasks_not_created,
+    "PHASE_GATE_READY": fix_phase_gate_ready,
+    "TESTING_REQUIRED": fix_testing_required,
+    "ACCEPTANCE_REQUIRED": fix_acceptance_required,
     "EMPTY_PR": fix_empty_pr,
     "MISSING_MARKER": fix_missing_marker,
     "TRIVIAL_NOT_IMPLEMENTED": implement_trivial_issue,
@@ -661,6 +782,11 @@ def build_plan(
             continue
         target = problem["target"]
         if target.get("type") == "issue" and target.get("number") in blocked_issue_numbers:
+            continue
+        # Phase enforcement: an issue carrying a phase/* label only admits the
+        # problem types appropriate to that phase (e.g. no implementation work
+        # in phase/testing). Issues with no phase label are unconstrained.
+        if not _phase_allows(problem):
             continue
         new_steps = fixer(problem)
         if not new_steps:

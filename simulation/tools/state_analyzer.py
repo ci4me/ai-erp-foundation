@@ -41,6 +41,32 @@ CI_FEEDBACK_REQUEST = "EXPLANATION:"
 # Label that opts an issue/PR into automatic ADR recording.
 ADR_CANDIDATE_LABEL = "adr-candidate"
 
+# Five-phase feature lifecycle. Labels are the single source of phase truth;
+# PHASE_ORDER drives the next-phase computation for the phase gate.
+PHASE_LABELS = {
+    "planning": "phase/planning",
+    "implementation": "phase/implementation",
+    "testing": "phase/testing",
+    "acceptance": "phase/acceptance",
+    "done": "phase/done",
+}
+PHASE_ORDER = ("planning", "implementation", "testing", "acceptance", "done")
+# Which actions the planner may target at an issue while it is in a given phase.
+# An issue with no phase label is unconstrained (legacy/non-lifecycle issues).
+PHASE_ALLOWED_ACTIONS = {
+    "phase/planning": {
+        "decompose_feature", "comment_issue", "comment_discussion",
+        "design_solution", "phase_gate", "triage_issue",
+    },
+    "phase/implementation": {
+        "create_pr", "implement_issue", "create_sub_issues", "review_pr",
+        "merge_pr", "close_issue", "phase_gate",
+    },
+    "phase/testing": {"run_tests", "phase_gate"},
+    "phase/acceptance": {"acceptance_review", "comment_issue", "phase_gate"},
+    "phase/done": set(),
+}
+
 
 def _texts(item: dict[str, Any]) -> list[str]:
     """All searchable text for an item: its body plus every comment body."""
@@ -238,6 +264,125 @@ def get_blocking_issues(state: dict[str, Any], issue: dict[str, Any]) -> list[in
                     if ref not in blockers:
                         blockers.append(ref)
     return blockers
+
+
+# -- five-phase lifecycle ----------------------------------------------------
+
+def get_current_phase(issue: dict[str, Any]) -> str | None:
+    """Return the issue's ``phase/*`` label, or None if it has no phase."""
+    for label in _labels(issue):
+        if label.startswith("phase/"):
+            return label
+    return None
+
+
+def _next_phase_label(current_label: str) -> str | None:
+    """The label of the phase after ``current_label``, or None at the end."""
+    for key, label in PHASE_LABELS.items():
+        if label == current_label:
+            idx = PHASE_ORDER.index(key)
+            if idx + 1 < len(PHASE_ORDER):
+                return PHASE_LABELS[PHASE_ORDER[idx + 1]]
+            return None
+    return None
+
+
+def _approved(item: dict[str, Any]) -> bool:
+    """True iff an ``ACCEPTANCE-DECISION: Approved`` appears in body/comments."""
+    joined = "\n".join(_texts(item))
+    return re.search(r"(?im)^\s*ACCEPTANCE-DECISION:\s*Approved\b", joined) is not None
+
+
+def _blocked(item: dict[str, Any]) -> bool:
+    """True iff an ``ACCEPTANCE-DECISION: Blocked`` appears in body/comments."""
+    joined = "\n".join(_texts(item))
+    return re.search(r"(?im)^\s*ACCEPTANCE-DECISION:\s*Blocked\b", joined) is not None
+
+
+def _has_test_report_pass(item: dict[str, Any]) -> bool:
+    joined = "\n".join(_texts(item))
+    return re.search(r"(?im)^\s*TEST-REPORT:\s*Pass\b", joined) is not None
+
+
+def _has_approval_request(item: dict[str, Any]) -> bool:
+    joined = "\n".join(_texts(item))
+    return "REQUEST-APPROVAL-FROM:" in joined
+
+
+def _child_issues(state: dict[str, Any], parent_number: Any) -> list[dict[str, Any]]:
+    needle = f"Parent epic: #{parent_number}"
+    return [i for i in state.get("issues", []) if needle in (i.get("body") or "")]
+
+
+def _subtask_meets_dod(child: dict[str, Any]) -> bool:
+    """Definition of Done for a sub-task: closed, has an approving review, no open objection.
+
+    The child issue is sourced from the *open* issue list, so a sub-task still
+    present here is by definition not closed yet — callers use ``has_child_issues``
+    plus closed-state semantics. When a closed snapshot is supplied (state field
+    set), honor it; otherwise an approving review with no objection is required.
+    """
+    if (child.get("state") or "open") != "closed":
+        return False
+    joined = "\n".join(_texts(child))
+    approved = re.search(r"(?im)^\s*REVIEW-VERDICT:\s*(APPROVE|APPROVED)\b", joined)
+    objection_open = "OBJECTION:" in joined and "RESOLUTION:" not in joined
+    return bool(approved) and not objection_open
+
+
+def implementation_complete(state: dict[str, Any], epic: dict[str, Any]) -> bool:
+    """True iff every child sub-task is closed and meets its Definition of Done.
+
+    Children that remain in the open-issue snapshot count as not-yet-closed. A
+    closed child carried in a fixture (``state == 'closed'``) must also satisfy
+    the DoD checks.
+    """
+    children = _child_issues(state, epic.get("number"))
+    closed_children = state.get("closed_children") or []
+    if not children and not closed_children:
+        return False
+    # Any open child means implementation is not complete.
+    if any((c.get("state") or "open") != "closed" for c in children):
+        return False
+    # Every closed child (open-list with state=closed, plus explicit fixtures)
+    # must meet the Definition of Done.
+    candidates = [c for c in children if (c.get("state") or "open") == "closed"]
+    candidates.extend(closed_children)
+    return bool(candidates) and all(_subtask_meets_dod(c) for c in candidates)
+
+
+def phase_gate_ready(state: dict[str, Any], epic: dict[str, Any]) -> str | None:
+    """Return the next phase label iff the epic's current phase exit criteria pass.
+
+    Exit criteria:
+    - planning -> implementation: a debate resolution (CONSENSUS-REACHED/RESOLUTION)
+      AND a DECOMPOSITION-PLAN AND, if an approval gate was posted, Approved.
+    - implementation -> testing: implementation_complete (all children closed + DoD).
+    - testing -> acceptance: TEST-REPORT: Pass.
+    - acceptance -> done: ACCEPTANCE-DECISION: Approved.
+    """
+    current = get_current_phase(epic)
+    if current is None:
+        return None
+    nxt = _next_phase_label(current)
+    if nxt is None:
+        return None
+
+    if current == PHASE_LABELS["planning"]:
+        ready = (
+            has_resolution_marker(epic)
+            and has_decomposition_plan(epic)
+            and (not _has_approval_request(epic) or _approved(epic))
+        )
+    elif current == PHASE_LABELS["implementation"]:
+        ready = implementation_complete(state, epic)
+    elif current == PHASE_LABELS["testing"]:
+        ready = _has_test_report_pass(epic)
+    elif current == PHASE_LABELS["acceptance"]:
+        ready = _approved(epic)
+    else:
+        ready = False
+    return nxt if ready else None
 
 
 def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -465,6 +610,61 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
                     "blockers": blockers,
                 }
             )
+
+    # Phase lifecycle (only issues carrying a phase/* label participate).
+    for issue in issues:
+        phase = get_current_phase(issue)
+        if phase is None:
+            continue
+
+        # Priority 2: ready to advance to the next phase.
+        nxt = phase_gate_ready(state, issue)
+        if nxt is not None:
+            problems.append(
+                {
+                    "type": "PHASE_GATE_READY",
+                    "priority": 2,
+                    "target": {"type": "issue", "number": issue["number"]},
+                    "data": issue,
+                    "current_phase": phase,
+                    "next_phase": nxt,
+                }
+            )
+            continue  # don't also raise in-phase work while a gate is pending
+
+        # Priority 4: testing phase needs a test run (no TEST-REPORT yet).
+        if phase == PHASE_LABELS["testing"] and not _has_test_report_pass(issue):
+            joined = "\n".join(_texts(issue))
+            if "TEST-REPORT:" not in joined:
+                problems.append(
+                    {
+                        "type": "TESTING_REQUIRED",
+                        "priority": 4,
+                        "target": {"type": "issue", "number": issue["number"]},
+                        "data": issue,
+                    }
+                )
+
+        # Priority 3: acceptance phase needs a human approval request posted.
+        if phase == PHASE_LABELS["acceptance"]:
+            if _blocked(issue):
+                problems.append(
+                    {
+                        "type": "ACCEPTANCE_BLOCKED",
+                        "priority": 1,
+                        "target": {"type": "issue", "number": issue["number"]},
+                        "data": issue,
+                    }
+                )
+            elif not _has_approval_request(issue):
+                problems.append(
+                    {
+                        "type": "ACCEPTANCE_REQUIRED",
+                        "priority": 3,
+                        "target": {"type": "issue", "number": issue["number"]},
+                        "data": issue,
+                    }
+                )
 
     problems.sort(key=lambda p: p["priority"])
     return problems
