@@ -17,6 +17,11 @@
 /public/build/
 *.log
 
+# Python bytecode and planner debug logs.
+__pycache__/
+*.pyc
+/logs/
+
 # PHP test / static-analysis cache.
 .phpunit.result.cache
 .phpunit.cache/

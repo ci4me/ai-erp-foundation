@@ -21,6 +21,7 @@ Mode handling (``single`` vs ``multi``) lives in :func:`build_plan`:
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -44,26 +45,19 @@ def _run_id() -> str:
     return f"{stamp}-{os.urandom(4).hex()}"
 
 
-def _build_body(action: str, reasoning: list[str], markers: list[str]) -> tuple[str, str]:
-    """Compose a persona-headed action body and return ``(persona_id, body)``.
+def _compose_body(persona_id: str, reasoning: list[str], markers: list[str]) -> str:
+    """Render a persona-headed action body for an explicit persona id.
 
-    The persona, role, layer, and model are all pulled from the registry for
-    ``action`` so the emitted header always reflects the live persona catalog.
-
-    Args:
-        action: the (possibly pseudo-) action this step performs.
-        reasoning: ordered chain-of-thought lines (rendered as a numbered list).
-        markers: state-machine marker lines appended verbatim after the reasoning.
+    The role, layer, and model are pulled from the registry for ``persona_id``
+    so the emitted header always reflects the live persona catalog.
     """
-    reg = _get_registry()
-    persona_id = reg.get_persona_for_action(action)
-    persona = reg.get_persona(persona_id) or {}
+    persona = _get_registry().get_persona(persona_id) or {}
     role = persona.get("role", "unknown")
     layer = persona.get("layer", "unknown")
     model = persona.get("model", DEFAULT_MODEL)
 
     numbered = "\n".join(f"{i}. {line}" for i, line in enumerate(reasoning, 1))
-    body = (
+    return (
         "---\n"
         f"Persona: {persona_id}\n"
         f"Role: {role}\n"
@@ -77,7 +71,18 @@ def _build_body(action: str, reasoning: list[str], markers: list[str]) -> tuple[
         + "\n".join(markers)
         + "\n"
     )
-    return persona_id, body
+
+
+def _build_body(action: str, reasoning: list[str], markers: list[str]) -> tuple[str, str]:
+    """Compose a body for the persona that owns ``action``; return ``(id, body)``.
+
+    Args:
+        action: the (possibly pseudo-) action this step performs.
+        reasoning: ordered chain-of-thought lines (rendered as a numbered list).
+        markers: state-machine marker lines appended verbatim after the reasoning.
+    """
+    persona_id = _get_registry().get_persona_for_action(action)
+    return persona_id, _compose_body(persona_id, reasoning, markers)
 
 
 # -----------------------------------------------------------------------------
@@ -281,8 +286,132 @@ def resolve_stale_discussion(problem: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+# -----------------------------------------------------------------------------
+# Persona request system — let a persona pull other personas into the loop.
+# -----------------------------------------------------------------------------
+
+# Marker -> which request bucket the named personas land in.
+_REQUEST_MARKERS: dict[str, str] = {
+    "REQUEST-REPLY-FROM:": "reply",
+    "REQUEST-REVIEW-FROM:": "review",
+    "REQUEST-APPROVAL-FROM:": "approval",
+    "QUESTION-TO:": "question",
+}
+
+# Persona-handle shape: lowercase, hyphen-separated (e.g. ``mara-product-owner``).
+_HANDLE_RE = re.compile(r"@?([a-z0-9][a-z0-9-]+)")
+
+
+def _parse_requests(body: str) -> dict[str, list[str]]:
+    """Extract requested persona ids per marker from an issue/PR body.
+
+    Only tokens that match a *known* persona id are kept, so free text after a
+    ``QUESTION-TO: @iris-security? is this safe?`` line does not produce bogus
+    handles. Order is preserved and duplicates removed within each bucket.
+    """
+    known = {p["id"] for p in _get_registry().load_all()}
+    result: dict[str, list[str]] = {key: [] for key in ("reply", "review", "approval", "question")}
+    for line in (body or "").splitlines():
+        for marker, bucket in _REQUEST_MARKERS.items():
+            if marker in line:
+                segment = line.split(marker, 1)[1].lower()
+                for handle in _HANDLE_RE.findall(segment):
+                    if handle in known and handle not in result[bucket]:
+                        result[bucket].append(handle)
+    return result
+
+
+def _answered_personas(comments: list[dict[str, Any]]) -> set[str]:
+    """Persona ids that already replied (their ``Persona:`` header appears)."""
+    known = {p["id"] for p in _get_registry().load_all()}
+    answered: set[str] = set()
+    for comment in comments or []:
+        cbody = comment.get("body") or ""
+        for persona_id in known:
+            if f"Persona: {persona_id}" in cbody:
+                answered.add(persona_id)
+    return answered
+
+
+def _dedupe(seq: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in seq:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def handle_unanswered_request(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Generate one action per requested persona that has not yet responded.
+
+    On an **issue**, requested personas reply via ``comment_issue``; on a **PR**
+    they respond via ``review_pr``. Personas whose ``Persona:`` header already
+    appears in the item's comments are skipped, so a re-run does not re-post.
+    """
+    target = problem["target"]
+    data = problem["data"]
+    body = data.get("body", "") or ""
+    answered = _answered_personas(data.get("comments", []))
+    requests = _parse_requests(body)
+
+    is_pr = target["type"] == "pr"
+    num = target["number"]
+    label = "PR" if is_pr else "issue"
+    excerpt = " ".join(body[:400].split())
+
+    # On a PR, review/approval/reply all surface as a review; on an issue they
+    # all surface as a comment.
+    requested = _dedupe(
+        requests["review"] + requests["approval"] + requests["reply"] + requests["question"]
+    )
+
+    steps: list[dict[str, Any]] = []
+    for persona_id in requested:
+        if persona_id in answered:
+            continue
+        reasoning = [
+            f"@{persona_id} was explicitly requested to respond to {label} #{num}.",
+            "Replying on that persona's behalf so the multi-agent conversation advances.",
+        ]
+        if is_pr:
+            markers = [
+                "REVIEW-VERDICT: COMMENT",
+                f"REVIEW-FROM: @{persona_id}",
+                "",
+                "**Requested context:**",
+                f"> {excerpt}",
+                "",
+                "Provide the substantive review and any required verdict here.",
+            ]
+            action = "review_pr"
+            tgt = {"type": "pr", "number": num}
+        else:
+            markers = [
+                f"REPLY-FROM: @{persona_id}",
+                "",
+                "**Requested context:**",
+                f"> {excerpt}",
+                "",
+                "Provide the substantive response and any required markers here.",
+            ]
+            action = "comment_issue"
+            tgt = {"type": "issue", "number": num}
+        steps.append(
+            {
+                "persona": persona_id,
+                "action": action,
+                "target": tgt,
+                "body": _compose_body(persona_id, reasoning, markers),
+            }
+        )
+    return steps
+
+
 # Dispatch table: problem type -> fixer.
 _FIXERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
+    "UNANSWERED_REQUEST": handle_unanswered_request,
     "EMPTY_PR": fix_empty_pr,
     "MISSING_MARKER": fix_missing_marker,
     "TRIVIAL_NOT_IMPLEMENTED": implement_trivial_issue,

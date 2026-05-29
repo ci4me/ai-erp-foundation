@@ -19,6 +19,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from simulation.tools.state_fetcher import has_request_marker
+
 REQUIRED_ISSUE_MARKERS = ("TEAM-REQUEST:", "PLAN-REQUEST:", "AUDIT-ISSUE:")
 
 UNREVIEWED_PR_AGE = timedelta(days=1)
@@ -53,11 +55,18 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
 
     Rules, in priority order:
 
+    0. ``UNANSWERED_REQUEST`` — issue/PR whose body carries a persona-request
+       marker (REQUEST-REPLY-FROM / REQUEST-REVIEW-FROM / REQUEST-APPROVAL-FROM /
+       QUESTION-TO). Highest priority so multi-agent conversations advance first.
     1. ``EMPTY_PR`` — open PR with no source-code files.
     2. ``MISSING_MARKER`` — open issue lacking every required marker.
     3. ``TRIVIAL_NOT_IMPLEMENTED`` — ``trivial``-labeled issue with no linked PR.
     4. ``UNREVIEWED_PR`` — PR open > 1 day with zero reviews.
     5. ``STALE_DISCUSSION`` — ``PLAN-REQUEST:`` without ``PLAN-READY:`` for > 2 days.
+
+    Note: a request is flagged whenever the marker is present; the plan builder
+    is responsible for skipping personas that have already replied, so an
+    already-answered request yields no steps rather than re-posting.
     """
     problems: list[dict[str, Any]] = []
     # Timezone-aware "now" so comparisons against parsed (aware) timestamps
@@ -67,6 +76,28 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
     prs = state.get("prs", [])
     issues = state.get("issues", [])
     discussions = state.get("discussions", [])
+
+    # Priority 0: unanswered persona requests (issues and PRs).
+    for issue in issues:
+        if has_request_marker(issue.get("body")):
+            problems.append(
+                {
+                    "type": "UNANSWERED_REQUEST",
+                    "priority": 0,
+                    "target": {"type": "issue", "number": issue["number"]},
+                    "data": issue,
+                }
+            )
+    for pr in prs:
+        if has_request_marker(pr.get("body")):
+            problems.append(
+                {
+                    "type": "UNANSWERED_REQUEST",
+                    "priority": 0,
+                    "target": {"type": "pr", "number": pr["number"]},
+                    "data": pr,
+                }
+            )
 
     # Priority 1: empty PRs (no source-code files).
     for pr in prs:
