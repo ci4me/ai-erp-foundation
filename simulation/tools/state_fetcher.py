@@ -28,21 +28,62 @@ CODE_EXTENSIONS: frozenset[str] = frozenset(
     }
 )
 
+# Markers a persona can place in an issue/PR body to pull other personas in.
+REQUEST_MARKERS: tuple[str, ...] = (
+    "REQUEST-REPLY-FROM:",
+    "REQUEST-REVIEW-FROM:",
+    "REQUEST-APPROVAL-FROM:",
+    "QUESTION-TO:",
+)
 
-def run_gh(args: list[str], repo: str = DEFAULT_REPO, *, check: bool = True) -> str:
-    """Run ``gh <args> --repo <repo>`` and return stdout.
+# Collaboration markers (debate / clarification / escalation / decisions). Their
+# presence in a body is the cheap signal that an item's comments are worth
+# fetching for the collaboration detectors in state_analyzer.
+COLLABORATION_MARKERS: tuple[str, ...] = (
+    "REQUEST-INFO:",
+    "RESPONSE:",
+    "ARGUMENT:",
+    "COUNTER-PROPOSAL:",
+    "REBUTTAL:",
+    "EVIDENCE:",
+    "RESOLUTION:",
+    "OBJECTION:",
+    "ESCALATION:",
+    "EXPLANATION:",
+    "DECISION-FROM-LEAD:",
+)
+
+
+def has_request_marker(text: str | None) -> bool:
+    """True iff ``text`` contains any persona-request marker."""
+    text = text or ""
+    return any(marker in text for marker in REQUEST_MARKERS)
+
+
+def has_collaboration_marker(text: str | None) -> bool:
+    """True iff ``text`` contains any collaboration marker."""
+    text = text or ""
+    return any(marker in text for marker in COLLABORATION_MARKERS)
+
+
+def run_gh(
+    args: list[str], repo: str = DEFAULT_REPO, *, check: bool = True, repo_flag: bool = True
+) -> str:
+    """Run a ``gh`` command and return stdout.
 
     Args:
         args: argv for ``gh`` *without* the leading ``gh`` (e.g.
             ``["pr", "list", "--state", "open"]``).
-        repo: ``owner/name`` appended as ``--repo``.
+        repo: ``owner/name`` appended as ``--repo`` when ``repo_flag`` is True.
         check: when True (default) a non-zero exit raises ``RuntimeError``;
             when False the stderr is swallowed and ``""`` is returned.
+        repo_flag: append ``--repo``. Set False for ``gh api`` calls, which do
+            not accept that flag (the repo lives in the request path instead).
 
     Returns:
         The command's stdout (possibly empty).
     """
-    cmd = ["gh", *args, "--repo", repo]
+    cmd = ["gh", *args] + (["--repo", repo] if repo_flag else [])
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         if check:
@@ -62,12 +103,33 @@ def _has_code(pr: dict[str, Any]) -> bool:
     return False
 
 
+def fetch_comments(kind: str, number: Any, repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
+    """Fetch the comments on an issue or PR (best-effort, [] on failure).
+
+    Args:
+        kind: ``"issue"`` or ``"pr"``.
+        number: the issue/PR number.
+    """
+    raw = run_gh(
+        [kind, "view", str(number), "--json", "comments", "--jq", ".comments"],
+        repo,
+        check=False,
+    )
+    if not raw.strip():
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
 def fetch_prs(repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
     """Fetch open PRs, each annotated with ``reviews`` and ``has_code``."""
     raw = run_gh(
         [
             "pr", "list", "--state", "open",
-            "--json", "number,title,headRefName,createdAt,updatedAt,labels,url,files",
+            "--json", "number,title,body,headRefName,createdAt,updatedAt,labels,url,files",
         ],
         repo,
     )
@@ -83,11 +145,14 @@ def fetch_prs(repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             pr["reviews"] = []
         pr["has_code"] = _has_code(pr)
+        # PRs are few, and review-deadlock detection (OBJECTION markers) lives in
+        # PR comments, so always fetch them.
+        pr["comments"] = fetch_comments("pr", pr["number"], repo)
     return prs
 
 
 def fetch_issues(repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
-    """Fetch open issues with labels and body."""
+    """Fetch open issues with labels, body, and (for request issues) comments."""
     raw = run_gh(
         [
             "issue", "list", "--state", "open",
@@ -95,16 +160,78 @@ def fetch_issues(repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
         ],
         repo,
     )
-    return json.loads(raw) if raw.strip() else []
+    issues: list[dict[str, Any]] = json.loads(raw) if raw.strip() else []
+    for issue in issues:
+        # Issues are numerous, so only pay for comments when the body already
+        # signals a request/collaboration thread worth inspecting.
+        body = issue.get("body")
+        issue["comments"] = (
+            fetch_comments("issue", issue["number"], repo)
+            if has_request_marker(body) or has_collaboration_marker(body)
+            else []
+        )
+    return issues
+
+
+def _normalize_discussion(raw: dict[str, Any]) -> dict[str, Any]:
+    """Map a REST discussion object to the analyzer's camelCase field names."""
+    return {
+        "number": raw.get("number"),
+        "title": raw.get("title"),
+        "body": raw.get("body"),
+        "createdAt": raw.get("created_at") or raw.get("createdAt"),
+        "updatedAt": raw.get("updated_at") or raw.get("updatedAt"),
+        "url": raw.get("html_url") or raw.get("url"),
+    }
+
+
+def fetch_discussion_comments(number: Any, repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
+    """Fetch a discussion's comments via REST (best-effort, [] on failure).
+
+    Normalizes to ``{"body", "author": {"login"}}`` so collaboration detectors
+    can read comments uniformly across issues, PRs, and discussions.
+    """
+    raw = run_gh(
+        ["api", f"/repos/{repo}/discussions/{number}/comments"],
+        repo,
+        check=False,
+        repo_flag=False,
+    )
+    if not raw.strip():
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [
+        {"body": c.get("body", ""), "author": {"login": (c.get("user") or {}).get("login", "")}}
+        for c in data
+    ]
 
 
 def fetch_discussions(repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
-    """Fetch open discussions via the GraphQL API.
+    """Fetch open discussions, preferring the REST endpoint, GraphQL as fallback.
 
-    Discussions are a GraphQL-only feature; repos without it (or tokens lacking
-    the scope) yield an empty list rather than an error, so the planner keeps
-    running on its PR/issue findings.
+    Each discussion is annotated with its ``comments`` so the debate detector can
+    inspect the thread. Repos/tokens without the Discussions feature yield an
+    empty list rather than an error, so the planner keeps running on its
+    PR/issue findings.
     """
+    rest = run_gh(["api", f"/repos/{repo}/discussions"], repo, check=False, repo_flag=False)
+    if rest.strip():
+        try:
+            data = json.loads(rest)
+            if isinstance(data, list):
+                discussions = [_normalize_discussion(d) for d in data]
+                for disc in discussions:
+                    disc["comments"] = fetch_discussion_comments(disc["number"], repo)
+                return discussions
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: GraphQL (some token scopes expose discussions only here).
     owner, _, name = repo.partition("/")
     query = (
         "query($owner:String!,$name:String!){repository(owner:$owner,name:$name)"
@@ -120,11 +247,13 @@ def fetch_discussions(repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
         ],
         repo,
         check=False,
+        repo_flag=False,
     )
     if not raw.strip():
         return []
     try:
-        return json.loads(raw)
+        nodes = json.loads(raw)
+        return nodes if isinstance(nodes, list) else []
     except json.JSONDecodeError:
         return []
 

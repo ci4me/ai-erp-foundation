@@ -92,8 +92,38 @@ python3 scripts/run_planner.py --mode single --apply
 
 Pipeline: `state_fetcher` → `state_analyzer` → `plan_builder` → `plan_executor`,
 configured by `simulation/tools/config.py`. Detected problem types, in priority
-order: empty PRs (no source files), issues missing required markers, trivial
-issues with no PR, unreviewed PRs, and stale plan-request discussions.
+order: **unanswered persona requests**, empty PRs (no source files), issues
+missing required markers, trivial issues with no PR, unreviewed PRs, and stale
+plan-request discussions.
+
+### Persona request system
+
+A persona can pull others into the loop by adding a marker to an issue/PR body:
+
+```text
+REQUEST-REPLY-FROM: @mara-product-owner, @tessa-test-lead
+REQUEST-REVIEW-FROM: @theo-architect
+REQUEST-APPROVAL-FROM: @vera-risk-officer
+QUESTION-TO: @iris-security? Is this endpoint safe?
+```
+
+These become the highest-priority problem (`UNANSWERED_REQUEST`), and the
+planner generates one reply/review action per *known* persona that has **not
+yet responded** — so re-running never double-posts. Only handles matching a
+real persona id are honored; free text after a `QUESTION-TO:` is ignored.
+
+### Debug logs
+
+Every executed (or dry-run) step is written to
+`logs/YYYY-MM-DD/<run_id>-step-<NNNN>.json` by
+`simulation/tools/debug_logger.py` (persona, action, target, prompt body, the
+exact `gh` command, its output, success/error, and the dry-run flag). The
+console shows one summary line per step; the `logs/` directory is gitignored.
+
+```bash
+ls logs/$(date +%Y-%m-%d)/
+cat logs/$(date +%Y-%m-%d)/*-step-0001.json | jq '.'
+```
 
 ## Documentation map
 

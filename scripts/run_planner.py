@@ -37,6 +37,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from simulation.tools import config  # noqa: E402
+from simulation.tools.debug_logger import get_logger  # noqa: E402
 from simulation.tools.plan_builder import build_plan  # noqa: E402
 from simulation.tools.plan_executor import execute_plan  # noqa: E402
 from simulation.tools.state_analyzer import analyze_state  # noqa: E402
@@ -110,6 +111,20 @@ def main(argv: list[str] | None = None) -> int:
     with open(PLAN_DUMP_PATH, "w", encoding="utf-8") as fh:
         json.dump(plan, fh, indent=2)
     print(f"📄 Plan written to {PLAN_DUMP_PATH}")
+
+    # Record the whole plan as the run's step 0 so the logs/ directory captures
+    # what was planned, not only what executed.
+    logger = get_logger()
+    logger.set_mode(plan["mode"])
+    logger.log(
+        persona="orchestrator",
+        action="plan_built",
+        target={"type": "planner", "number": ""},
+        total_steps=plan["total_steps"],
+        problems_detected=len(problems),
+        plan_summary=plan,
+        dry_run=not cfg.apply,
+    )
 
     print("🚀 Executing plan...")
     execute_plan(plan, apply=cfg.apply, repo=args.repo)

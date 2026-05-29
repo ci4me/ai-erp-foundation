@@ -21,11 +21,15 @@ Mode handling (``single`` vs ``multi``) lives in :func:`build_plan`:
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from simulation.tools import config
 from simulation.tools.persona_registry import DEFAULT_MODEL, PersonaRegistry
+
+_TEMPLATE_DIR = Path(".github/action-templates")
 
 _registry: Optional[PersonaRegistry] = None
 
@@ -44,26 +48,19 @@ def _run_id() -> str:
     return f"{stamp}-{os.urandom(4).hex()}"
 
 
-def _build_body(action: str, reasoning: list[str], markers: list[str]) -> tuple[str, str]:
-    """Compose a persona-headed action body and return ``(persona_id, body)``.
+def _compose_body(persona_id: str, reasoning: list[str], markers: list[str]) -> str:
+    """Render a persona-headed action body for an explicit persona id.
 
-    The persona, role, layer, and model are all pulled from the registry for
-    ``action`` so the emitted header always reflects the live persona catalog.
-
-    Args:
-        action: the (possibly pseudo-) action this step performs.
-        reasoning: ordered chain-of-thought lines (rendered as a numbered list).
-        markers: state-machine marker lines appended verbatim after the reasoning.
+    The role, layer, and model are pulled from the registry for ``persona_id``
+    so the emitted header always reflects the live persona catalog.
     """
-    reg = _get_registry()
-    persona_id = reg.get_persona_for_action(action)
-    persona = reg.get_persona(persona_id) or {}
+    persona = _get_registry().get_persona(persona_id) or {}
     role = persona.get("role", "unknown")
     layer = persona.get("layer", "unknown")
     model = persona.get("model", DEFAULT_MODEL)
 
     numbered = "\n".join(f"{i}. {line}" for i, line in enumerate(reasoning, 1))
-    body = (
+    return (
         "---\n"
         f"Persona: {persona_id}\n"
         f"Role: {role}\n"
@@ -77,7 +74,18 @@ def _build_body(action: str, reasoning: list[str], markers: list[str]) -> tuple[
         + "\n".join(markers)
         + "\n"
     )
-    return persona_id, body
+
+
+def _build_body(action: str, reasoning: list[str], markers: list[str]) -> tuple[str, str]:
+    """Compose a body for the persona that owns ``action``; return ``(id, body)``.
+
+    Args:
+        action: the (possibly pseudo-) action this step performs.
+        reasoning: ordered chain-of-thought lines (rendered as a numbered list).
+        markers: state-machine marker lines appended verbatim after the reasoning.
+    """
+    persona_id = _get_registry().get_persona_for_action(action)
+    return persona_id, _compose_body(persona_id, reasoning, markers)
 
 
 # -----------------------------------------------------------------------------
@@ -281,13 +289,242 @@ def resolve_stale_discussion(problem: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+# -----------------------------------------------------------------------------
+# Persona request system — let a persona pull other personas into the loop.
+# -----------------------------------------------------------------------------
+
+# Marker -> which request bucket the named personas land in.
+_REQUEST_MARKERS: dict[str, str] = {
+    "REQUEST-REPLY-FROM:": "reply",
+    "REQUEST-REVIEW-FROM:": "review",
+    "REQUEST-APPROVAL-FROM:": "approval",
+    "QUESTION-TO:": "question",
+}
+
+# Splits a body into [text, MARKER, arg, MARKER, arg, ...] so each marker's
+# argument is isolated even when several share one physical line (e.g. when a
+# body is created with literal "\n" rather than real newlines).
+_SPLIT_RE = re.compile("(" + "|".join(re.escape(m) for m in _REQUEST_MARKERS) + ")")
+
+# Persona-handle shape: lowercase, hyphen-separated (e.g. ``mara-product-owner``).
+_HANDLE_RE = re.compile(r"@?([a-z0-9][a-z0-9-]+)")
+
+
+def _parse_requests(body: str) -> list[dict[str, str]]:
+    """Parse persona requests from an issue/PR body, in marker order.
+
+    Returns a list of ``{"bucket", "persona", "question"}`` records. Only tokens
+    matching a *known* persona id are kept (so free text after a marker can't
+    fabricate handles), and ``(bucket, persona)`` pairs are de-duplicated. For
+    ``QUESTION-TO: @persona? <text>`` the question text is captured in
+    ``question``; other buckets leave it empty.
+    """
+    known = {p["id"] for p in _get_registry().load_all()}
+    records: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    parts = _SPLIT_RE.split(body or "")
+    # parts[0] is leading text; thereafter alternates marker, arg, marker, arg...
+    for i in range(1, len(parts), 2):
+        marker = parts[i]
+        arg = parts[i + 1] if i + 1 < len(parts) else ""
+        bucket = _REQUEST_MARKERS[marker]
+
+        if bucket == "question":
+            m = re.match(r"\s*@?([a-z0-9][a-z0-9-]+)\s*\?\s*(.*)", arg, re.IGNORECASE | re.DOTALL)
+            if m and m.group(1).lower() in known:
+                persona = m.group(1).lower()
+                question = m.group(2).strip().split("\n", 1)[0][:300]
+                key = (bucket, persona)
+                if key not in seen:
+                    seen.add(key)
+                    records.append({"bucket": bucket, "persona": persona, "question": question})
+            continue
+
+        for handle in _HANDLE_RE.findall(arg.lower()):
+            if handle in known and (bucket, handle) not in seen:
+                seen.add((bucket, handle))
+                records.append({"bucket": bucket, "persona": handle, "question": ""})
+    return records
+
+
+def _answered_personas(comments: list[dict[str, Any]]) -> set[str]:
+    """Persona ids that already replied (their ``Persona:`` header appears)."""
+    known = {p["id"] for p in _get_registry().load_all()}
+    answered: set[str] = set()
+    for comment in comments or []:
+        cbody = comment.get("body") or ""
+        for persona_id in known:
+            if f"Persona: {persona_id}" in cbody:
+                answered.add(persona_id)
+    return answered
+
+
+def handle_unanswered_request(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Generate one action per requested persona that has not yet responded.
+
+    On an **issue**, requested personas reply via ``comment_issue``; on a **PR**
+    they respond via ``review_pr``. ``QUESTION-TO`` carries the specific question
+    into the generated prompt. Personas whose ``Persona:`` header already appears
+    in the item's comments are skipped, so a re-run does not re-post.
+    """
+    target = problem["target"]
+    data = problem["data"]
+    body = data.get("body", "") or ""
+    answered = _answered_personas(data.get("comments", []))
+    requests = _parse_requests(body)
+
+    is_pr = target["type"] == "pr"
+    num = target["number"]
+    label = "PR" if is_pr else "issue"
+    excerpt = " ".join(body[:400].split())
+
+    steps: list[dict[str, Any]] = []
+    for record in requests:
+        persona_id = record["persona"]
+        if persona_id in answered:
+            continue
+        bucket = record["bucket"]
+
+        if bucket == "question":
+            reasoning = [
+                f"@{persona_id} was asked a direct question on {label} #{num}.",
+                f"The question: {record['question']}",
+                "Answering on that persona's behalf to advance the conversation.",
+            ]
+        else:
+            reasoning = [
+                f"@{persona_id} was requested ({bucket}) on {label} #{num}.",
+                "Responding on that persona's behalf so the multi-agent conversation advances.",
+            ]
+
+        # On a PR, review/approval requests surface as a review; everything on an
+        # issue (and replies/questions) surface as a comment.
+        if is_pr and bucket in ("review", "approval"):
+            markers = [
+                "REVIEW-VERDICT: COMMENT",
+                f"REVIEW-FROM: @{persona_id}",
+                "",
+                "**Requested context:**",
+                f"> {excerpt}",
+                "",
+                "Provide the substantive review and any required verdict here.",
+            ]
+            action, tgt = "review_pr", {"type": "pr", "number": num}
+        else:
+            markers = [
+                f"REPLY-FROM: @{persona_id}",
+                "",
+                "**Requested context:**",
+                f"> {excerpt}",
+                "",
+                "Provide the substantive response and any required markers here.",
+            ]
+            action = "comment_issue"
+            tgt = {"type": target["type"], "number": num}
+
+        steps.append(
+            {
+                "persona": persona_id,
+                "action": action,
+                "target": tgt,
+                "body": _compose_body(persona_id, reasoning, markers),
+            }
+        )
+    return steps
+
+
+# -----------------------------------------------------------------------------
+# Collaboration fixers — clarification, debate resolution, deadlock escalation.
+# -----------------------------------------------------------------------------
+
+def _render_template(name: str, **subs: Any) -> str:
+    """Render a ``.github/action-templates`` file, substituting ``{{ key }}``."""
+    text = (_TEMPLATE_DIR / name).read_text(encoding="utf-8")
+    for key, value in subs.items():
+        text = re.sub(r"{{\s*" + re.escape(key) + r"\s*}}", str(value), text)
+    return text
+
+
+def _lead_persona() -> str:
+    """The Lead persona: the executive-layer orchestrator (fallback ari)."""
+    lead = _get_registry().get_persona_by_layer("executive")
+    return lead["id"] if lead else "ari-orchestrator"
+
+
+def fix_unanswered_request_info(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Answer an issue's open REQUEST-INFO with a RESPONSE so work can proceed."""
+    num = problem["target"]["number"]
+    lead = _lead_persona()
+    reasoning = [
+        f"Issue #{num} has an open REQUEST-INFO marker with no RESPONSE yet.",
+        "Posting the requested information unblocks the task.",
+    ]
+    markers = [
+        "RESPONSE: provide the requested information here so the loop can proceed.",
+    ]
+    return [
+        {
+            "persona": lead,
+            "action": "comment_issue",
+            "target": {"type": "issue", "number": num},
+            "body": _compose_body(lead, reasoning, markers),
+        }
+    ]
+
+
+def fix_unresolved_debate(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Record a RESOLUTION (or escalate) on a debate that has no decision yet."""
+    num = problem["target"]["number"]
+    lead = _lead_persona()
+    reasoning = [
+        f"Discussion #{num} has debate markers (ARGUMENT/COUNTER-PROPOSAL/...) "
+        "but no RESOLUTION or DECISION-FROM-LEAD.",
+        "Reviewing the thread to record a resolution or escalate to the Lead.",
+    ]
+    rendered = _render_template("resolve_debate.md", persona=lead, target_number=num)
+    return [
+        {
+            "persona": lead,
+            "action": "comment_discussion",
+            "target": {"type": "discussion", "number": num},
+            "body": _compose_body(lead, reasoning, [rendered]),
+        }
+    ]
+
+
+def fix_review_deadlock(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Escalate a PR whose review is stuck behind repeated OBJECTION markers."""
+    num = problem["target"]["number"]
+    lead = _lead_persona()
+    reasoning = [
+        f"PR #{num} carries two or more OBJECTION markers — the review is deadlocked.",
+        "Escalating to the Lead persona to make a binding decision.",
+    ]
+    rendered = _render_template(
+        "escalate.md", persona=lead, target_type="PR", target_number=num, lead_persona=lead
+    )
+    return [
+        {
+            "persona": lead,
+            "action": "review_pr",
+            "target": {"type": "pr", "number": num},
+            "body": _compose_body(lead, reasoning, [rendered]),
+        }
+    ]
+
+
 # Dispatch table: problem type -> fixer.
 _FIXERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
+    "UNANSWERED_REQUEST": handle_unanswered_request,
+    "REVIEW_DEADLOCK": fix_review_deadlock,
+    "UNANSWERED_REQUEST_INFO": fix_unanswered_request_info,
     "EMPTY_PR": fix_empty_pr,
     "MISSING_MARKER": fix_missing_marker,
     "TRIVIAL_NOT_IMPLEMENTED": implement_trivial_issue,
     "UNREVIEWED_PR": review_unreviewed_pr,
     "STALE_DISCUSSION": resolve_stale_discussion,
+    "UNRESOLVED_DEBATE": fix_unresolved_debate,
 }
 
 

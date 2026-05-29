@@ -19,10 +19,52 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from simulation.tools.state_fetcher import has_request_marker
+
 REQUIRED_ISSUE_MARKERS = ("TEAM-REQUEST:", "PLAN-REQUEST:", "AUDIT-ISSUE:")
 
 UNREVIEWED_PR_AGE = timedelta(days=1)
 STALE_DISCUSSION_AGE = timedelta(days=2)
+
+# Markers that indicate an active design debate in a discussion thread.
+DEBATE_MARKERS = ("ARGUMENT:", "COUNTER-PROPOSAL:", "REBUTTAL:", "EVIDENCE:")
+# Two or more objections on a PR signal a stuck review.
+REVIEW_DEADLOCK_THRESHOLD = 2
+
+
+def _texts(item: dict[str, Any]) -> list[str]:
+    """All searchable text for an item: its body plus every comment body."""
+    texts = [item.get("body") or ""]
+    texts.extend((c.get("body") or "") for c in (item.get("comments") or []))
+    return texts
+
+
+def has_open_request_info(item: dict[str, Any]) -> bool:
+    """True iff a ``REQUEST-INFO:`` appears with no later ``RESPONSE:``.
+
+    Scans body then comments in order; a RESPONSE seen after a REQUEST-INFO
+    clears the block.
+    """
+    request_open = False
+    for text in _texts(item):
+        if "REQUEST-INFO:" in text:
+            request_open = True
+        if "RESPONSE:" in text and request_open:
+            request_open = False
+    return request_open
+
+
+def has_unresolved_debate(discussion: dict[str, Any]) -> bool:
+    """True iff a discussion has debate markers but no ``RESOLUTION:``/lead decision."""
+    joined = "\n".join(_texts(discussion))
+    debating = any(marker in joined for marker in DEBATE_MARKERS)
+    resolved = "RESOLUTION:" in joined or "DECISION-FROM-LEAD:" in joined
+    return debating and not resolved
+
+
+def count_objections(pr: dict[str, Any]) -> int:
+    """Count ``OBJECTION:`` markers across a PR's body and comments."""
+    return sum(text.count("OBJECTION:") for text in _texts(pr))
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -53,11 +95,23 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
 
     Rules, in priority order:
 
+    0. ``UNANSWERED_REQUEST`` — issue/PR whose body carries a persona-request
+       marker (REQUEST-REPLY-FROM / REQUEST-REVIEW-FROM / REQUEST-APPROVAL-FROM /
+       QUESTION-TO). Highest priority so multi-agent conversations advance first.
+    1. ``REVIEW_DEADLOCK`` — PR with >= 2 ``OBJECTION:`` markers (stuck review).
+    1. ``UNANSWERED_REQUEST_INFO`` — issue with an open ``REQUEST-INFO:`` (no
+       later ``RESPONSE:``); blocks progress.
     1. ``EMPTY_PR`` — open PR with no source-code files.
     2. ``MISSING_MARKER`` — open issue lacking every required marker.
     3. ``TRIVIAL_NOT_IMPLEMENTED`` — ``trivial``-labeled issue with no linked PR.
     4. ``UNREVIEWED_PR`` — PR open > 1 day with zero reviews.
     5. ``STALE_DISCUSSION`` — ``PLAN-REQUEST:`` without ``PLAN-READY:`` for > 2 days.
+    5. ``UNRESOLVED_DEBATE`` — discussion with debate markers but no
+       ``RESOLUTION:`` / ``DECISION-FROM-LEAD:``.
+
+    Note: a request is flagged whenever the marker is present; the plan builder
+    is responsible for skipping personas that have already replied, so an
+    already-answered request yields no steps rather than re-posting.
     """
     problems: list[dict[str, Any]] = []
     # Timezone-aware "now" so comparisons against parsed (aware) timestamps
@@ -67,6 +121,52 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
     prs = state.get("prs", [])
     issues = state.get("issues", [])
     discussions = state.get("discussions", [])
+
+    # Priority 0: unanswered persona requests (issues and PRs).
+    for issue in issues:
+        if has_request_marker(issue.get("body")):
+            problems.append(
+                {
+                    "type": "UNANSWERED_REQUEST",
+                    "priority": 0,
+                    "target": {"type": "issue", "number": issue["number"]},
+                    "data": issue,
+                }
+            )
+    for pr in prs:
+        if has_request_marker(pr.get("body")):
+            problems.append(
+                {
+                    "type": "UNANSWERED_REQUEST",
+                    "priority": 0,
+                    "target": {"type": "pr", "number": pr["number"]},
+                    "data": pr,
+                }
+            )
+
+    # Priority 1: review deadlocks (>= 2 OBJECTION markers on a PR).
+    for pr in prs:
+        if count_objections(pr) >= REVIEW_DEADLOCK_THRESHOLD:
+            problems.append(
+                {
+                    "type": "REVIEW_DEADLOCK",
+                    "priority": 1,
+                    "target": {"type": "pr", "number": pr["number"]},
+                    "data": pr,
+                }
+            )
+
+    # Priority 1: issues with an open REQUEST-INFO (no RESPONSE yet).
+    for issue in issues:
+        if has_open_request_info(issue):
+            problems.append(
+                {
+                    "type": "UNANSWERED_REQUEST_INFO",
+                    "priority": 1,
+                    "target": {"type": "issue", "number": issue["number"]},
+                    "data": issue,
+                }
+            )
 
     # Priority 1: empty PRs (no source-code files).
     for pr in prs:
@@ -136,6 +236,18 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
                         "data": disc,
                     }
                 )
+
+    # Priority 5: debates with no resolution yet.
+    for disc in discussions:
+        if has_unresolved_debate(disc):
+            problems.append(
+                {
+                    "type": "UNRESOLVED_DEBATE",
+                    "priority": 5,
+                    "target": {"type": "discussion", "number": disc["number"]},
+                    "data": disc,
+                }
+            )
 
     problems.sort(key=lambda p: p["priority"])
     return problems

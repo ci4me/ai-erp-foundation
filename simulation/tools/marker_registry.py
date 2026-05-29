@@ -93,6 +93,43 @@ def marker_names() -> tuple[str, ...]:
     return tuple(names)
 
 
+def _load_section(section: str) -> dict[str, Any]:
+    """Load a non-action marker section (``request_markers``/``collaboration_markers``).
+
+    These sections live alongside ``markers:`` but are deliberately excluded from
+    the action<->marker registry, so they are read directly here.
+    """
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to load marker registry")
+    data = yaml.safe_load(MARKER_REGISTRY_PATH.read_text()) or {}
+    raw = data.get(section) or {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _section_prefixes(section: str) -> tuple[str, ...]:
+    raw = _load_section(section)
+    return tuple(
+        sorted(f"{(spec or {}).get('marker', name)}:" for name, spec in raw.items())
+    )
+
+
+def request_marker_names() -> tuple[str, ...]:
+    """Marker prefixes for persona-request markers (e.g. ``REQUEST-REPLY-FROM:``)."""
+    return _section_prefixes("request_markers")
+
+
+def collaboration_marker_names() -> tuple[str, ...]:
+    """Marker prefixes for collaboration markers (e.g. ``ARGUMENT:``, ``RESOLUTION:``)."""
+    return _section_prefixes("collaboration_markers")
+
+
+def all_marker_prefixes() -> tuple[str, ...]:
+    """Every recognized marker prefix: action + request + collaboration."""
+    return tuple(
+        sorted(set(marker_names()) | set(request_marker_names()) | set(collaboration_marker_names()))
+    )
+
+
 def infer_actions_from_body(body: str) -> list[str]:
     """Return all action ids whose marker regex matches the supplied body."""
     return [action_id for action_id, spec in load_marker_specs().items() if spec.matches(body)]
