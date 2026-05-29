@@ -32,6 +32,7 @@ REQUIRED_COLLABORATION_MARKERS = [
     "REQUEST-INFO", "RESPONSE", "ARGUMENT", "COUNTER-PROPOSAL", "REBUTTAL",
     "EVIDENCE", "RESOLUTION", "OBJECTION", "ESCALATION", "EXPLANATION",
     "DECISION-FROM-LEAD", "CONSENSUS-REACHED",
+    "DECOMPOSE-REQUEST", "SUB-TASK", "DECOMPOSITION-PLAN",
 ]
 REQUIRED_REQUEST_MARKERS = [
     "REQUEST-REPLY-FROM", "REQUEST-REVIEW-FROM", "REQUEST-APPROVAL-FROM", "QUESTION-TO",
@@ -39,11 +40,13 @@ REQUIRED_REQUEST_MARKERS = [
 COLLABORATION_TEMPLATES = [
     "request_info.md", "debate.md", "resolve_debate.md", "escalate.md",
     "record_adr.md", "explain.md", "reach_consensus.md",
+    "decompose_feature.md", "create_sub_issues.md",
 ]
 # Problem types that must be wired into the planner's analyzer.
 REQUIRED_DETECTORS = [
     "UNANSWERED_REQUEST", "REVIEW_DEADLOCK", "UNANSWERED_REQUEST_INFO",
     "UNRESOLVED_DEBATE", "MISSING_EXPLANATION", "UNRECORDED_ADR",
+    "EPIC_UNDECOMPOSED", "SUBTASKS_NOT_CREATED", "BLOCKED_BY_DEPENDENCY",
 ]
 
 
@@ -122,6 +125,12 @@ def audit_production_readiness() -> bool:
         print(f"✅ config.DEBATE_RESOLUTION_TIMEOUT_HOURS = "
               f"{config.DEBATE_RESOLUTION_TIMEOUT_HOURS}.")
 
+    if getattr(config, "EPIC_DETECTION_MODE", None) not in ("label", "marker", "heuristic"):
+        print("❌ config.EPIC_DETECTION_MODE is missing or invalid.")
+        ok = False
+    else:
+        print(f"✅ config.EPIC_DETECTION_MODE = {config.EPIC_DETECTION_MODE}.")
+
     analyzer_src = (ROOT / "simulation" / "tools" / "state_analyzer.py").read_text()
     missing = [d for d in REQUIRED_DETECTORS if d not in analyzer_src]
     if missing:
@@ -133,7 +142,10 @@ def audit_production_readiness() -> bool:
     # The plan builder must have a fixer registered for the corrective detectors.
     from simulation.tools import plan_builder
 
-    for needed in ("MISSING_EXPLANATION", "UNRECORDED_ADR", "UNRESOLVED_DEBATE"):
+    for needed in (
+        "MISSING_EXPLANATION", "UNRECORDED_ADR", "UNRESOLVED_DEBATE",
+        "EPIC_UNDECOMPOSED", "SUBTASKS_NOT_CREATED",
+    ):
         if needed not in plan_builder._FIXERS:
             print(f"❌ plan_builder has no fixer for {needed}.")
             ok = False

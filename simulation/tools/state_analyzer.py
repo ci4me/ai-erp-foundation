@@ -16,6 +16,7 @@ mirrors the markers the autonomous loop needs in order to triage an issue.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -183,6 +184,60 @@ def _labels(item: dict[str, Any]) -> list[str]:
         (lbl.get("name", "") if isinstance(lbl, dict) else str(lbl))
         for lbl in (item.get("labels") or [])
     ]
+
+
+# -- epic decomposition + dependency tracking --------------------------------
+
+def is_epic(issue: dict[str, Any], mode: str | None = None) -> bool:
+    """True iff an issue should be treated as an epic needing decomposition.
+
+    Gate depends on :data:`simulation.tools.config.EPIC_DETECTION_MODE`:
+    ``label`` (the safe default) trusts only the ``epic`` label; ``marker`` also
+    accepts a ``DECOMPOSE-REQUEST:`` body marker; ``heuristic`` also treats an
+    over-long body as an epic.
+    """
+    mode = mode or config.EPIC_DETECTION_MODE
+    if "epic" in _labels(issue):
+        return True
+    body = issue.get("body") or ""
+    if mode in ("marker", "heuristic") and "DECOMPOSE-REQUEST:" in body:
+        return True
+    if mode == "heuristic" and len(body) > config.EPIC_BODY_LENGTH_THRESHOLD:
+        return True
+    return False
+
+
+def has_decomposition_plan(issue: dict[str, Any]) -> bool:
+    """True iff a DECOMPOSITION-PLAN appears in the issue body or comments."""
+    return any("DECOMPOSITION-PLAN:" in text for text in _texts(issue))
+
+
+def has_child_issues(state: dict[str, Any], parent_number: Any) -> bool:
+    """True iff some issue links back to ``parent_number`` as its parent epic."""
+    needle = f"Parent epic: #{parent_number}"
+    return any(needle in (i.get("body") or "") for i in state.get("issues", []))
+
+
+def _issue_by_number(state: dict[str, Any], number: int) -> dict[str, Any] | None:
+    return next((i for i in state.get("issues", []) if i.get("number") == number), None)
+
+
+def get_blocking_issues(state: dict[str, Any], issue: dict[str, Any]) -> list[int]:
+    """Return open issues that ``issue`` declares it ``Depends on: #<n>``.
+
+    Only blockers still present in the (open-issues) state count; a referenced
+    issue that is absent is assumed closed/resolved.
+    """
+    blockers: list[int] = []
+    for line in (issue.get("body") or "").splitlines():
+        if line.strip().lower().startswith("depends on:"):
+            for token in re.findall(r"#(\d+)", line):
+                ref = int(token)
+                ref_issue = _issue_by_number(state, ref)
+                if ref_issue is not None and (ref_issue.get("state") or "open") != "closed":
+                    if ref not in blockers:
+                        blockers.append(ref)
+    return blockers
 
 
 def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -370,6 +425,44 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
                     "priority": 5,
                     "target": {"type": kind, "number": item["number"]},
                     "data": item,
+                }
+            )
+
+    # Priority 3: epic decomposition lifecycle.
+    for issue in issues:
+        if not is_epic(issue):
+            continue
+        if not has_decomposition_plan(issue):
+            problems.append(
+                {
+                    "type": "EPIC_UNDECOMPOSED",
+                    "priority": 3,
+                    "target": {"type": "issue", "number": issue["number"]},
+                    "data": issue,
+                }
+            )
+        elif not has_child_issues(state, issue["number"]):
+            problems.append(
+                {
+                    "type": "SUBTASKS_NOT_CREATED",
+                    "priority": 3,
+                    "target": {"type": "issue", "number": issue["number"]},
+                    "data": issue,
+                }
+            )
+
+    # Priority 1: dependency blockers — informational, no corrective action.
+    # The plan builder consults these to skip work on blocked issues.
+    for issue in issues:
+        blockers = get_blocking_issues(state, issue)
+        if blockers:
+            problems.append(
+                {
+                    "type": "BLOCKED_BY_DEPENDENCY",
+                    "priority": 1,
+                    "target": {"type": "issue", "number": issue["number"]},
+                    "data": issue,
+                    "blockers": blockers,
                 }
             )
 

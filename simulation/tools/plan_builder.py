@@ -571,13 +571,54 @@ def fix_unrecorded_adr(problem: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-# Dispatch table: problem type -> fixer.
+def fix_epic_undecomposed(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Ask the Architect to produce a DECOMPOSITION-PLAN for an epic."""
+    num = problem["target"]["number"]
+    architect = _architect_persona()
+    reasoning = [
+        f"Issue #{num} is an epic with no DECOMPOSITION-PLAN yet.",
+        "Producing a plan so the work can ship as small, independent PRs.",
+    ]
+    rendered = _render_template("decompose_feature.md", persona=architect, parent_issue=num)
+    return [
+        {
+            "persona": architect,
+            "action": "comment_issue",
+            "target": {"type": "issue", "number": num},
+            "body": _compose_body(architect, reasoning, [rendered]),
+        }
+    ]
+
+
+def fix_subtasks_not_created(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Create the sub-issues described by an epic's DECOMPOSITION-PLAN."""
+    num = problem["target"]["number"]
+    lead = _lead_persona()
+    reasoning = [
+        f"Epic #{num} has a DECOMPOSITION-PLAN but no child issues yet.",
+        "Creating one sub-issue per SUB-TASK (idempotent — skip existing children).",
+    ]
+    rendered = _render_template("create_sub_issues.md", persona=lead, parent_issue=num)
+    return [
+        {
+            "persona": lead,
+            "action": "comment_issue",
+            "target": {"type": "issue", "number": num},
+            "body": _compose_body(lead, reasoning, [rendered]),
+        }
+    ]
+
+
+# Dispatch table: problem type -> fixer. BLOCKED_BY_DEPENDENCY is intentionally
+# absent — it is informational and instead suppresses other work (see build_plan).
 _FIXERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "UNANSWERED_REQUEST": handle_unanswered_request,
     "REVIEW_DEADLOCK": fix_review_deadlock,
     "UNANSWERED_REQUEST_INFO": fix_unanswered_request_info,
     "MISSING_EXPLANATION": fix_missing_explanation,
     "UNRECORDED_ADR": fix_unrecorded_adr,
+    "EPIC_UNDECOMPOSED": fix_epic_undecomposed,
+    "SUBTASKS_NOT_CREATED": fix_subtasks_not_created,
     "EMPTY_PR": fix_empty_pr,
     "MISSING_MARKER": fix_missing_marker,
     "TRIVIAL_NOT_IMPLEMENTED": implement_trivial_issue,
@@ -606,9 +647,20 @@ def build_plan(
     resolved_mode = config.resolve(mode=mode).mode
     steps: list[dict[str, Any]] = []
 
+    # Issues blocked by an open dependency: do no corrective work on them until
+    # the blocker closes (BLOCKED_BY_DEPENDENCY is informational, not a fixer).
+    blocked_issue_numbers = {
+        p["target"].get("number")
+        for p in problems
+        if p["type"] == "BLOCKED_BY_DEPENDENCY"
+    }
+
     for problem in problems:
         fixer = _FIXERS.get(problem["type"])
         if fixer is None:
+            continue
+        target = problem["target"]
+        if target.get("type") == "issue" and target.get("number") in blocked_issue_numbers:
             continue
         new_steps = fixer(problem)
         if not new_steps:

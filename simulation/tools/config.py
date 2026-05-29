@@ -59,6 +59,17 @@ def _env_int(name: str, default: int) -> int:
 # Override with the DEBATE_RESOLUTION_TIMEOUT_HOURS environment variable.
 DEBATE_RESOLUTION_TIMEOUT_HOURS = _env_int("DEBATE_RESOLUTION_TIMEOUT_HOURS", 24)
 
+# How the planner decides an issue is an epic needing decomposition:
+#   'label'     — only the explicit `epic` label (safest default).
+#   'marker'    — also a DECOMPOSE-REQUEST: marker in the body.
+#   'heuristic' — also a body longer than EPIC_BODY_LENGTH_THRESHOLD chars.
+EPIC_DETECTION_MODE = os.getenv("EPIC_DETECTION_MODE", "label").lower()
+if EPIC_DETECTION_MODE not in ("label", "marker", "heuristic"):
+    EPIC_DETECTION_MODE = "label"
+
+# Body length (chars) above which 'heuristic' mode treats an issue as an epic.
+EPIC_BODY_LENGTH_THRESHOLD = _env_int("EPIC_BODY_LENGTH_THRESHOLD", 500)
+
 if PLANNER_MODE not in VALID_MODES:
     raise ValueError(
         f"Invalid PLANNER_MODE: {PLANNER_MODE!r}. Must be one of {VALID_MODES}."

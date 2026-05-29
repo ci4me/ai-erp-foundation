@@ -435,3 +435,21 @@ collaboration_markers:
     regex: '(?im)^CONSENSUS-REACHED:\s*\S.*\(signees:.*@[a-z0-9-]+.*@[a-z0-9-]+.*\)'
     terminal: true
     meaning: Two or more distinct personas agreed on a decision (stronger than RESOLUTION).
+
+  DECOMPOSE-REQUEST:
+    marker: DECOMPOSE-REQUEST
+    regex: '(?im)^DECOMPOSE-REQUEST:\s*\S.*'
+    terminal: false
+    meaning: Explicitly request that an issue be decomposed into sub-tasks.
+
+  SUB-TASK:
+    marker: SUB-TASK
+    regex: '(?im)^SUB-TASK:\s*\S.*'
+    terminal: false
+    meaning: One sub-task within a decomposition plan (title; effort/depends-on/assignee optional).
+
+  DECOMPOSITION-PLAN:
+    marker: DECOMPOSITION-PLAN
+    regex: '(?im)^DECOMPOSITION-PLAN:'
+    terminal: false
+    meaning: A plan listing at least two SUB-TASK items for an epic.
