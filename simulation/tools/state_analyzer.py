@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from simulation.tools import config
+from simulation.tools.item_validator import filter_state
 from simulation.tools.state_fetcher import has_request_marker
 
 REQUIRED_ISSUE_MARKERS = ("TEAM-REQUEST:", "PLAN-REQUEST:", "AUDIT-ISSUE:")
@@ -477,6 +478,11 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
     # Timezone-aware "now" so comparisons against parsed (aware) timestamps
     # never raise "can't compare offset-naive and offset-aware datetimes".
     now = datetime.now(timezone.utc)
+
+    # Validity / scope gate: drop items the loop must skip (junk labels,
+    # note-only PRs) and, in focus mode, anything outside the loop:active set.
+    # No-op for snapshots that use none of those labels.
+    state, _skipped = filter_state(state)
 
     prs = state.get("prs", [])
     issues = state.get("issues", [])

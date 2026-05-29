@@ -627,6 +627,30 @@ query($owner:String!, $name:String!) {
 
 def resolve_priority(state: RepoState, repo: str) -> tuple[str, dict[str, Any]]:
     """Walk the priority list; return ``(priority_label, context_dict)``."""
+    import dataclasses
+
+    from simulation.tools.item_validator import filter_state
+
+    # Validity / scope gate: hide items the loop must skip (junk labels,
+    # note-only PRs) and, in focus mode, anything outside the loop:active set.
+    # A repo using none of those labels is unaffected.
+    _snap = {
+        "prs": state.open_prs,
+        "issues": state.open_issues,
+        "discussions": state.open_discussions,
+    }
+    _filtered, _ = filter_state(_snap)
+    _kept_pr_nums = {p.get("number") for p in _filtered["prs"]}
+    state = dataclasses.replace(
+        state,
+        open_prs=_filtered["prs"],
+        open_issues=_filtered["issues"],
+        open_discussions=_filtered["discussions"],
+        prs_with_changes_requested=[
+            p for p in state.prs_with_changes_requested if p.get("number") in _kept_pr_nums
+        ],
+    )
+
     personas = _load_persona_index()
 
     if len(state.open_prs) >= 5:
@@ -935,6 +959,12 @@ def _find_create_issue_request(
             continue
         body = str(issue.get("body") or "")
         labels = set(_label_names(issue))
+        # An issue already triaged to `ready-for-agent` is directly
+        # implementable — do NOT spin a duplicate issue off its request marker
+        # (that would loop forever on the same TEAM-REQUEST). Only raw,
+        # not-yet-ready requests get converted into a fresh bounded issue.
+        if "ready-for-agent" in labels:
+            continue
         if "needs-followup-issue" in labels or any(marker in body for marker in markers):
             return {"source_kind": "issue", "issue": issue, "persona_id": actor}
     return None
@@ -1046,7 +1076,15 @@ def _find_implementation_issue(state: RepoState) -> dict[str, Any] | None:
         labels = set(_label_names(issue))
         if issue.get("number") == 1:
             continue
-        if "ready-for-agent" in labels and "work:system-improvement" in labels:
+        # `ready-for-agent` is the canonical "triaged and implementable" signal.
+        # (Previously also required `work:system-improvement`, which was too
+        # narrow for a general template — a feature is `work:feature`, etc.)
+        # Skip issues already linked to an open PR so we don't re-implement.
+        if "ready-for-agent" not in labels:
+            continue
+        num = issue.get("number")
+        has_pr = any(f"#{num}" in (pr.get("title") or "") for pr in state.open_prs)
+        if not has_pr:
             return issue
     return None
 
@@ -1574,6 +1612,9 @@ def _issue_lifecycle_variables(context: dict[str, Any], action_id: str) -> dict[
         "issue_labels": _format_inline_list(_label_names(issue)) if issue else "none",
         "issue_milestone": _issue_milestone_title(issue),
         "target_milestone_title": _target_milestone_title(issue),
+        # assign-milestone.md uses {{requested_milestone_title}}; keep it as an
+        # alias of the target so the template renders (var-name mismatch bug).
+        "requested_milestone_title": _target_milestone_title(issue),
         "source_kind": source_kind,
         "source_number": source.get("number") or "[SOURCE_NUMBER]",
         "source_title": source_title or "[SOURCE_TITLE]",
