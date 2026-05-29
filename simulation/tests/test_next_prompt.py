@@ -1,4 +1,4 @@
-from simulation.tools import next_prompt
+from simulation.tools import next_prompt, next_prompt_legacy
 
 
 def test_parse_required_reviewers_from_pr_body():
@@ -227,10 +227,15 @@ def test_release_flow_requires_gate_accept_then_merge(monkeypatch):
             }
         ],
         "reviews": [],
-        "files": [{"path": "README.md"}],
+        # An actionable PR (touches source), so the validity filter keeps it in
+        # scope; the release gate is what we're exercising here, not note-only
+        # skipping.
+        "files": [{"path": "app/release_flow.py"}, {"path": "README.md"}],
         "url": "https://github.com/ci4me/ai-erp-foundation/pull/77",
     }
-    monkeypatch.setattr(next_prompt, "_load_pr_details", lambda repo, number: base_pr)
+    # resolve_priority lives in next_prompt_legacy and resolves _load_pr_details
+    # in that module's namespace, so patch it there.
+    monkeypatch.setattr(next_prompt_legacy, "_load_pr_details", lambda repo, number: base_pr)
 
     state = next_prompt.RepoState(
         open_prs=[base_pr],

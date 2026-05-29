@@ -30,6 +30,24 @@ from typing import Any
 
 from simulation.tools.state_fetcher import CODE_EXTENSIONS
 
+# Files that constitute a real, mergeable change beyond source code:
+# CI/infrastructure config, build, data, and web assets. A workflow YAML or a
+# Terraform/Dockerfile change alters system behavior and must be reviewed — it
+# is not a "note". Documentation (``.md``/``.rst``/``.txt``) is intentionally
+# *not* here: a docs-only PR stays "note-only" by design (see
+# ``test_item_validator.test_note_only_pr_skipped``).
+NON_CODE_ACTIONABLE_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".yml", ".yaml", ".json", ".toml", ".ini", ".cfg", ".conf", ".env",
+        ".sh", ".bash", ".zsh", ".ps1", ".dockerfile", ".tf", ".tfvars",
+        ".gradle", ".bazel", ".mk", ".cmake",
+        ".html", ".css", ".scss", ".sass", ".less", ".vue", ".svelte",
+        ".proto", ".graphql", ".xml", ".csv",
+    }
+)
+# A PR touching any file with one of these extensions is a real change.
+ACTIONABLE_EXTENSIONS: frozenset[str] = CODE_EXTENSIONS | NON_CODE_ACTIONABLE_EXTENSIONS
+
 # Items with any of these labels are never acted on by the loop.
 SKIP_LABELS: frozenset[str] = frozenset(
     {"invalid", "duplicate", "wontfix", "spam", "on-hold", "loop:skip"}
@@ -46,17 +64,20 @@ def _labels(item: dict[str, Any]) -> list[str]:
 
 
 def _is_note_only_pr(item: dict[str, Any]) -> bool:
-    """True iff a PR's changed files are known and include no source-code file.
+    """True iff a PR's changed files are known and include no actionable file.
 
-    When file info is absent (``files`` missing/empty) we do not guess — the PR
-    is left in scope so the loop can fetch and decide.
+    "Actionable" spans source code *and* CI/config/infra/build/web assets
+    (:data:`ACTIONABLE_EXTENSIONS`); only documentation-style files (``.md``,
+    ``.rst``, ``.txt``) are treated as notes. When file info is absent
+    (``files`` missing/empty) we do not guess — the PR is left in scope so the
+    loop can fetch and decide.
     """
     files = item.get("files") or []
     if not files:
         return False
     paths = [f.get("path", "") if isinstance(f, dict) else str(f) for f in files]
-    has_code = any(p.endswith(ext) for p in paths for ext in CODE_EXTENSIONS)
-    return not has_code
+    has_actionable = any(p.endswith(ext) for p in paths for ext in ACTIONABLE_EXTENSIONS)
+    return not has_actionable
 
 
 def validate_item(item: dict[str, Any], kind: str) -> tuple[bool, str]:

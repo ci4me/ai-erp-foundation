@@ -29,7 +29,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from simulation.tools import next_prompt
+from simulation.tools import next_prompt, next_prompt_legacy
 
 
 def _strip_repo_flags(args: list[str]) -> list[str]:
@@ -119,9 +119,17 @@ def run_from_fixture(
     max_diff_chars: int,
     post_mode: str,
 ) -> int:
-    """Patch `next_prompt._gh`, run the scheduler, and print/write output."""
+    """Patch the gh shim, run the scheduler, and print/write output.
+
+    ``gather_repo_state``/``resolve_priority``/``render_prompt`` were extracted
+    into ``next_prompt_legacy``; they resolve ``_gh`` in *that* module's
+    namespace, so the fixture shim must be installed there. We also bind it on
+    the ``next_prompt`` facade so the public surface stays consistent.
+    """
     fixture = json.loads(fixture_path.read_text())
-    next_prompt._gh = build_fixture_gh(fixture)  # type: ignore[method-assign]
+    fake_gh = build_fixture_gh(fixture)
+    next_prompt_legacy._gh = fake_gh  # type: ignore[assignment]
+    next_prompt._gh = fake_gh  # type: ignore[method-assign]
 
     state = next_prompt.gather_repo_state(repo)
     priority, context = next_prompt.resolve_priority(state, repo)

@@ -162,12 +162,24 @@ def fetch_issues(repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
     )
     issues: list[dict[str, Any]] = json.loads(raw) if raw.strip() else []
     for issue in issues:
-        # Issues are numerous, so only pay for comments when the body already
-        # signals a request/collaboration thread worth inspecting.
+        # Issues are numerous, so only pay for comments when the item is worth
+        # inspecting: it already signals a request/collaboration thread, OR it is
+        # a lifecycle item (an `epic` or any `phase/*`-labelled issue). Epic
+        # lifecycle markers (DECOMPOSITION-PLAN, CONSENSUS-REACHED, SUB-TASK,
+        # PHASE-CHANGE, ...) live in *comments* but are not request/collaboration
+        # markers, so without this an epic's plan/consensus is invisible to the
+        # planner and the epic can never advance past EPIC_UNDECOMPOSED.
         body = issue.get("body")
+        label_names = {
+            (lbl.get("name", "") if isinstance(lbl, dict) else str(lbl))
+            for lbl in (issue.get("labels") or [])
+        }
+        is_lifecycle = "epic" in label_names or any(
+            name.startswith("phase/") for name in label_names
+        )
         issue["comments"] = (
             fetch_comments("issue", issue["number"], repo)
-            if has_request_marker(body) or has_collaboration_marker(body)
+            if has_request_marker(body) or has_collaboration_marker(body) or is_lifecycle
             else []
         )
     return issues

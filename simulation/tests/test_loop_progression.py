@@ -1,6 +1,6 @@
 import json
 
-from simulation.tools import agent_output_validator, next_prompt
+from simulation.tools import agent_output_validator, next_prompt, next_prompt_legacy
 
 
 def _valid_iris_review() -> str:
@@ -74,7 +74,9 @@ def test_loop_progresses_to_next_reviewer_after_valid_marker(monkeypatch):
             return json.dumps(pr)
         raise AssertionError(args)
 
-    monkeypatch.setattr(next_prompt, "_gh", fake_gh)
+    # gather_repo_state/resolve_priority live in next_prompt_legacy and resolve
+    # _gh in that module's namespace, so the shim must be installed there.
+    monkeypatch.setattr(next_prompt_legacy, "_gh", fake_gh)
 
     priority, context = next_prompt.resolve_priority(
         next_prompt.gather_repo_state("ci4me/ai-erp-foundation"),
