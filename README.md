@@ -31,6 +31,12 @@ simulation/tools/next_prompt.py          Chooses and renders the next action
 simulation/tools/agent_output_validator.py
 simulation/tools/marker_registry.py
 simulation/tools/agent_event_guard.py
+scripts/run_planner.py                   Deterministic planner entry point
+simulation/tools/persona_registry.py     Dynamic persona discovery
+simulation/tools/state_fetcher.py        GitHub state snapshot
+simulation/tools/state_analyzer.py       Rule-based problem detection
+simulation/tools/plan_builder.py         Builds single/multi-step plans
+simulation/tools/plan_executor.py        Executes (or dry-runs) plans
 simulation/tests/                       Regression and coverage tests
 ```
 
@@ -57,6 +63,37 @@ Run the full static coverage audit with:
 ```bash
 python3 -m simulation.tools.action_coverage
 ```
+
+## Autonomous planner
+
+`scripts/run_planner.py` is a deterministic, LLM-free planner that reads live
+GitHub state, detects problems with a pure-Python rule engine, and assigns each
+fix to a persona discovered dynamically from `.github/agent-prompts/*.md` (no
+hardcoded persona ids — ownership is derived from each persona's frontmatter
+`actions` list).
+
+It has two independent axes:
+
+- **mode** — `single` resolves the single highest-priority problem (one action
+  per run); `multi` resolves every detected problem in one pass.
+- **apply** — the planner is **dry-run by default**; it prints exactly what it
+  would do and mutates nothing. Pass `--apply` (or `PLANNER_APPLY=1`) to execute.
+
+```bash
+# Dry-run the highest-priority action (safe default):
+python3 scripts/run_planner.py
+
+# Dry-run the full multi-step plan:
+python3 scripts/run_planner.py --mode multi
+
+# Execute one action for real:
+python3 scripts/run_planner.py --mode single --apply
+```
+
+Pipeline: `state_fetcher` → `state_analyzer` → `plan_builder` → `plan_executor`,
+configured by `simulation/tools/config.py`. Detected problem types, in priority
+order: empty PRs (no source files), issues missing required markers, trivial
+issues with no PR, unreviewed PRs, and stale plan-request discussions.
 
 ## Documentation map
 
