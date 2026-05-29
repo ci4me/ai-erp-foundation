@@ -25,6 +25,7 @@ actions:
     - address_changes_requested
     - implement_issue
     - prompt_improvement
+    - verify_implementation
 context_refs:
   review_pr:
     - simulation/README.md

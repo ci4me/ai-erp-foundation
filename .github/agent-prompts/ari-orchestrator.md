@@ -30,6 +30,7 @@ actions:
   support:
     - review_pr
     - merge_gate
+    - request_clarification
 context_refs:
   review_pr:
     - docs/operating-model.md

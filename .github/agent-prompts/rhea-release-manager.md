@@ -11,7 +11,7 @@ verdict_enum: [MERGE_READY, BLOCKED, COMMENT, ABSTAIN]
 activates_on: ["*"]
 actions:
   primary: [review_pr, accept_pr, merge_gate, merge_pr, reject_pr, close_milestone]
-  support: [re_ratification, close_issue]
+  support: [re_ratification, close_issue, retry_merge, close_plan]
 context_refs:
   review_pr: [docs/friction-budget.md, docs/amendment-policy.md]
   merge_gate: [docs/friction-budget.md, docs/amendment-policy.md]

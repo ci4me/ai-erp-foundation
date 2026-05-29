@@ -38,3 +38,15 @@ fi
 ### Step 3: Stop
 
 Rerun `next_prompt.py`; it may assign issues to the milestone next.
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+MILESTONE-STATE: CREATED
+```
+
+Allowed values: `CREATED`, `ASSIGNED`, `CLOSED`.

@@ -140,3 +140,15 @@ Run-ID: ${RUN_ID}
 SUMMARY
 gh issue comment 1 --repo "{{repo}}" --body-file "/tmp/pr-{{pr_number}}-blocker-summary.md"
 ````
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+ADDRESS-CHANGES: POSTED
+```
+
+Allowed values: `POSTED`, `BLOCKED`.

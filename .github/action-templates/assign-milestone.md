@@ -52,3 +52,15 @@ else
   echo "DRY-RUN: gh issue comment {{issue_number}} --repo {{repo}} --body-file /tmp/issue-{{issue_number}}-milestone.md"
 fi
 ```
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+MILESTONE-ASSIGNMENT: ASSIGNED
+```
+
+Allowed values: `ASSIGNED`, `BLOCKED`.

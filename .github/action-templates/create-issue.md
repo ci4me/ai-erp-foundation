@@ -69,3 +69,15 @@ fi
 ### Step 4: Stop
 
 The new issue must be triaged by a future `next_prompt.py` run.
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+ISSUE-STATE: CREATED
+```
+
+Allowed values: `CREATED`, `REOPENED`.

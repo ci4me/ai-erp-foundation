@@ -58,3 +58,15 @@ else
   echo "DRY-RUN: gh issue comment {{issue_number}} --repo {{repo}} --body-file /tmp/issue-{{issue_number}}-triage.md"
 fi
 ```
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+TRIAGE-DECISION: READY_FOR_AGENT
+```
+
+Allowed values: `READY_FOR_AGENT`, `NEEDS_TRIAGE`, `BLOCKED`, `DEFER`.

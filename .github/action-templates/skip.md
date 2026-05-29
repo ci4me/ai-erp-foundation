@@ -40,3 +40,15 @@ gh issue comment 1 --repo "{{repo}}" --body-file "/tmp/loop-skip.md"
 ### Step 2: Stop
 
 Do not create a branch, PR, issue, or discussion in this iteration.
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+LOOP-SKIP: SATURATED
+```
+
+Allowed values: `SATURATED`, `COOLDOWN`.
