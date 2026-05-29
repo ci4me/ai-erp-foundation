@@ -125,6 +125,27 @@ ls logs/$(date +%Y-%m-%d)/
 cat logs/$(date +%Y-%m-%d)/*-step-0001.json | jq '.'
 ```
 
+### Collaboration, epics, and phase lifecycle
+
+Beyond the linear `create_issue → triage → implement → review → merge` flow, the
+planner supports richer team behaviors (all driven by markers documented in
+[Markers and validation](docs/markers-and-validation.md)):
+
+- **Collaboration** — personas debate (`ARGUMENT`/`COUNTER-PROPOSAL`), clarify
+  (`REQUEST-INFO`/`RESPONSE`), decide (`RESOLUTION`, multi-persona
+  `CONSENSUS-REACHED`), and escalate deadlocks (`OBJECTION`/`ESCALATION`).
+- **Epic decomposition** — an `epic`-labeled issue is broken into `SUB-TASK`s via
+  a `DECOMPOSITION-PLAN`, with `Depends on: #n` dependency gating.
+- **Phase lifecycle** — epics advance through
+  `phase/planning → implementation → testing → acceptance → done`, gated on each
+  phase's exit criteria, with human approval at the Planning and Acceptance gates.
+
+The deterministic audit covers all of this:
+
+```bash
+python3 simulation/tools/full_audit.py
+```
+
 ## Documentation map
 
 - [Autonomous loop runbook](docs/autonomous-loop.md)

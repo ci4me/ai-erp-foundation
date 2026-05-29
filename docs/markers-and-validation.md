@@ -48,6 +48,40 @@ persona that has not already responded — so re-running never double-posts. Onl
 handles matching a real persona id (from `.github/agent-prompts/*.md`) are
 honored; unknown handles and free text are ignored.
 
+## Collaboration markers
+
+Personas debate, clarify, escalate, and decide using the markers in the
+`collaboration_markers:` section of `markers.yml` (also input markers, excluded
+from the action↔marker coverage check):
+
+| Marker | Purpose |
+|--------|---------|
+| `REQUEST-INFO:` / `RESPONSE:` | Ask a blocking clarifying question / answer it |
+| `ARGUMENT:` / `COUNTER-PROPOSAL:` / `REBUTTAL:` / `EVIDENCE:` | Structured debate |
+| `RESOLUTION:` | Single-persona decision (`approved/vetoed by <persona>`) |
+| `CONSENSUS-REACHED:` | Stronger multi-persona decision (`signees:` ≥2 distinct `@persona`) |
+| `OBJECTION:` / `ESCALATION:` / `DECISION-FROM-LEAD:` | Block, escalate deadlock, Lead ruling |
+| `EXPLANATION:` | Durable explanation (also used to answer CI failures) |
+| `DECOMPOSE-REQUEST:` / `SUB-TASK:` / `DECOMPOSITION-PLAN:` | Epic decomposition |
+| `TEST-REPORT: Pass\|Fail` / `PHASE-CHANGE:` | Phase-lifecycle testing + transition log |
+
+Planner detectors driven by these include `UNRESOLVED_DEBATE` (after a
+configurable `DEBATE_RESOLUTION_TIMEOUT_HOURS`), `REVIEW_DEADLOCK`,
+`MISSING_EXPLANATION`, and `UNRECORDED_ADR`.
+
+## Phase-lifecycle labels
+
+A feature epic moves through five phases, tracked by the `phase_labels:` in
+`markers.yml` — the single source of phase truth:
+
+`phase/planning → phase/implementation → phase/testing → phase/acceptance → phase/done`
+
+The planner advances an epic (`PHASE_GATE_READY`) only when the current phase's
+exit criteria are met (consensus + decomposition plan + approval; all sub-tasks
+closed and meeting their Definition of Done; `TEST-REPORT: Pass`;
+`ACCEPTANCE-DECISION: Approved`). It suppresses actions that do not belong to an
+issue's current phase, and waits on a human at the Planning and Acceptance gates.
+
 ## Agent output validation
 
 Before posting a GitHub comment/review/discussion response, write the body to a

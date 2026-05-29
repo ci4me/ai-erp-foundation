@@ -33,20 +33,24 @@ REQUIRED_COLLABORATION_MARKERS = [
     "EVIDENCE", "RESOLUTION", "OBJECTION", "ESCALATION", "EXPLANATION",
     "DECISION-FROM-LEAD", "CONSENSUS-REACHED",
     "DECOMPOSE-REQUEST", "SUB-TASK", "DECOMPOSITION-PLAN",
+    "TEST-REPORT", "PHASE-CHANGE",
 ]
 REQUIRED_REQUEST_MARKERS = [
     "REQUEST-REPLY-FROM", "REQUEST-REVIEW-FROM", "REQUEST-APPROVAL-FROM", "QUESTION-TO",
 ]
+REQUIRED_PHASE_LABELS = ["planning", "implementation", "testing", "acceptance", "done"]
 COLLABORATION_TEMPLATES = [
     "request_info.md", "debate.md", "resolve_debate.md", "escalate.md",
     "record_adr.md", "explain.md", "reach_consensus.md",
     "decompose_feature.md", "create_sub_issues.md",
+    "run_tests.md", "phase_gate.md", "acceptance_review.md",
 ]
 # Problem types that must be wired into the planner's analyzer.
 REQUIRED_DETECTORS = [
     "UNANSWERED_REQUEST", "REVIEW_DEADLOCK", "UNANSWERED_REQUEST_INFO",
     "UNRESOLVED_DEBATE", "MISSING_EXPLANATION", "UNRECORDED_ADR",
     "EPIC_UNDECOMPOSED", "SUBTASKS_NOT_CREATED", "BLOCKED_BY_DEPENDENCY",
+    "PHASE_GATE_READY", "TESTING_REQUIRED", "ACCEPTANCE_REQUIRED", "ACCEPTANCE_BLOCKED",
 ]
 
 
@@ -84,6 +88,15 @@ def audit_markers() -> bool:
         ok = False
     else:
         print(f"✅ All {len(REQUIRED_REQUEST_MARKERS)} request markers present.")
+
+    raw = yaml.safe_load((TEMPLATES / "markers.yml").read_text()) or {}
+    phase_labels = raw.get("phase_labels") or {}
+    missing_phases = [p for p in REQUIRED_PHASE_LABELS if p not in phase_labels]
+    if missing_phases:
+        print(f"❌ Missing phase labels: {missing_phases}")
+        ok = False
+    else:
+        print(f"✅ All {len(REQUIRED_PHASE_LABELS)} phase labels defined.")
 
     return ok
 
@@ -145,6 +158,7 @@ def audit_production_readiness() -> bool:
     for needed in (
         "MISSING_EXPLANATION", "UNRECORDED_ADR", "UNRESOLVED_DEBATE",
         "EPIC_UNDECOMPOSED", "SUBTASKS_NOT_CREATED",
+        "PHASE_GATE_READY", "TESTING_REQUIRED", "ACCEPTANCE_REQUIRED",
     ):
         if needed not in plan_builder._FIXERS:
             print(f"❌ plan_builder has no fixer for {needed}.")
