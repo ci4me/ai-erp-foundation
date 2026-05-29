@@ -242,6 +242,33 @@ actions:
     when: An issue has an explicit accepted/rejected/done marker and should be closed.
     compact_steps: [Verify terminal marker, post signed close reason, close issue, stop]
 
+  - id: open_issue
+    priority: 88
+    template: open-issue.md
+    class: planning
+    selector: explicit_open_issue_request
+    mutates: issue
+    when: An explicit OPEN-ISSUE request needs a new bounded issue opened.
+    compact_steps: [Read source, draft one bounded issue, open needs-triage issue, post ISSUE-OPENED]
+
+  - id: reopen_issue
+    priority: 89
+    template: reopen-issue.md
+    class: planning
+    selector: closed_issue_needs_reopen
+    mutates: issue, issue_comment
+    when: A closed issue has new evidence and must be reopened.
+    compact_steps: [Verify reopen reason, reopen issue, post ISSUE-REOPENED]
+
+  - id: request_review
+    priority: 35
+    template: request-review.md
+    class: review
+    selector: pr_needs_additional_reviewer
+    mutates: pr_review, issue_comment
+    when: A PR needs an explicit additional reviewer (persona or human).
+    compact_steps: [Identify required reviewer, post REVIEW-REQUEST with reason, stop]
+
   - id: create_milestone
     priority: 86
     template: create-milestone.md

@@ -177,6 +177,31 @@ def test_blocked_acceptance_prevents_done():
     )
 
 
+def test_testing_failed_triggers_rework_and_blocks_gate():
+    epic = _issue(
+        104, labels=["epic", "phase/testing"],
+        comments=["TEST-REPORT: Fail (details: send() throws on empty body)"],
+    )
+    state = _wrap([epic])
+    types = _types(state)
+    assert "TESTING_FAILED" in types
+    assert "TESTING_REQUIRED" not in types  # a report exists
+    assert phase_gate_ready(state, epic) is None  # Fail blocks the gate
+    plan = build_plan(analyze_state(state), mode="multi")
+    bodies = [s["body"] for s in plan["steps"] if s["target"].get("number") == 104]
+    assert any("PHASE-CHANGE: phase/testing -> phase/implementation" in b for b in bodies), bodies
+    assert any("bug" in b for b in bodies), bodies
+
+
+def test_testing_fail_then_pass_reaches_acceptance():
+    # After a fix, the latest report is Pass -> gate forward.
+    epic = _issue(
+        104, labels=["epic", "phase/testing"],
+        comments=["TEST-REPORT: Fail (bug)", "TEST-REPORT: Pass (fixed)"],
+    )
+    assert phase_gate_ready(_wrap([epic]), epic) == PHASE_LABELS["acceptance"]
+
+
 def test_rework_then_reapproval_reaches_done():
     # After rework + re-acceptance, the latest decision is Approved -> Done.
     epic = _issue(

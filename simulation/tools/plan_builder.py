@@ -623,7 +623,9 @@ _PHASE_ALLOWED_PROBLEMS: dict[str, set[str]] = {
         "UNREVIEWED_PR", "REVIEW_DEADLOCK", "MISSING_EXPLANATION",
         "PHASE_GATE_READY",
     },
-    "phase/testing": {"TESTING_REQUIRED", "MISSING_EXPLANATION", "PHASE_GATE_READY"},
+    "phase/testing": {
+        "TESTING_REQUIRED", "TESTING_FAILED", "MISSING_EXPLANATION", "PHASE_GATE_READY",
+    },
     "phase/acceptance": {"ACCEPTANCE_REQUIRED", "ACCEPTANCE_BLOCKED", "PHASE_GATE_READY"},
     "phase/done": set(),
 }
@@ -737,6 +739,32 @@ def fix_acceptance_blocked(problem: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def fix_testing_failed(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """File bug sub-issues for a failing test report and route back to implementation (G2)."""
+    num = problem["target"]["number"]
+    tester = _test_lead_persona()
+    reasoning = [
+        f"Epic #{num} has a failing TEST-REPORT — the testing gate is blocked.",
+        "Filing a bug sub-issue per distinct failure and routing back to "
+        "implementation for fixes.",
+    ]
+    rendered = _render_template("triage_test_failures.md", persona=tester, issue_number=num)
+    markers = [
+        rendered,
+        "",
+        "PHASE-CHANGE: phase/testing -> phase/implementation "
+        "(reason: TEST-REPORT: Fail — bugs filed for rework)",
+    ]
+    return [
+        {
+            "persona": tester,
+            "action": "comment_issue",
+            "target": {"type": "issue", "number": num},
+            "body": _compose_body(tester, reasoning, markers),
+        }
+    ]
+
+
 def fix_acceptance_required(problem: dict[str, Any]) -> list[dict[str, Any]]:
     """Request human sign-off for an epic that passed testing."""
     num = problem["target"]["number"]
@@ -771,6 +799,7 @@ _FIXERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "SUBTASKS_NOT_CREATED": fix_subtasks_not_created,
     "PHASE_GATE_READY": fix_phase_gate_ready,
     "TESTING_REQUIRED": fix_testing_required,
+    "TESTING_FAILED": fix_testing_failed,
     "ACCEPTANCE_REQUIRED": fix_acceptance_required,
     "ACCEPTANCE_BLOCKED": fix_acceptance_blocked,
     "EMPTY_PR": fix_empty_pr,

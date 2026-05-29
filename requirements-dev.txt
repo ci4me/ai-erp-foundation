@@ -1,0 +1,4 @@
+# Development / CI test dependencies for the simulation tooling.
+# Runtime is otherwise pure-Python standard library + PyYAML.
+pytest>=7.0
+PyYAML>=6.0

@@ -353,6 +353,19 @@ def _has_test_report_pass(item: dict[str, Any]) -> bool:
     return re.search(r"(?im)^\s*TEST-REPORT:\s*Pass\b", joined) is not None
 
 
+def latest_test_report(item: dict[str, Any]) -> str | None:
+    """Return the *most recent* TEST-REPORT value (Pass/Fail), or None.
+
+    Most-recent semantics mean a re-test after a fix (Pass following an earlier
+    Fail) reads as Pass and gates forward, while a fresh Fail blocks the gate.
+    """
+    latest: str | None = None
+    for text in _texts(item):
+        for m in re.finditer(r"(?im)^\s*TEST-REPORT:\s*(Pass|Fail)\b", text):
+            latest = m.group(1)
+    return latest
+
+
 def _has_approval_request(item: dict[str, Any]) -> bool:
     joined = "\n".join(_texts(item))
     return "REQUEST-APPROVAL-FROM:" in joined
@@ -426,7 +439,8 @@ def phase_gate_ready(state: dict[str, Any], epic: dict[str, Any]) -> str | None:
     elif current == PHASE_LABELS["implementation"]:
         ready = implementation_complete(state, epic)
     elif current == PHASE_LABELS["testing"]:
-        ready = _has_test_report_pass(epic)
+        # Acceptance only when the latest report is Pass; a standing Fail blocks.
+        ready = latest_test_report(epic) == "Pass"
     elif current == PHASE_LABELS["acceptance"]:
         # Done only when the *latest* decision is Approved; a standing Blocked
         # (not yet reworked) suppresses the transition.
@@ -683,14 +697,26 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
             )
             continue  # don't also raise in-phase work while a gate is pending
 
-        # Priority 4: testing phase needs a test run (no TEST-REPORT yet).
-        if phase == PHASE_LABELS["testing"] and not _has_test_report_pass(issue):
-            joined = "\n".join(_texts(issue))
-            if "TEST-REPORT:" not in joined:
+        # Testing phase: run tests, or follow up on a failing report.
+        if phase == PHASE_LABELS["testing"]:
+            report = latest_test_report(issue)
+            if report is None:
+                # Priority 4: no TEST-REPORT yet — run the suite.
                 problems.append(
                     {
                         "type": "TESTING_REQUIRED",
                         "priority": 4,
+                        "target": {"type": "issue", "number": issue["number"]},
+                        "data": issue,
+                    }
+                )
+            elif report == "Fail":
+                # Priority 2: latest report is Fail — block the gate and route to
+                # rework after ensuring bug sub-issues exist (G2).
+                problems.append(
+                    {
+                        "type": "TESTING_FAILED",
+                        "priority": 2,
                         "target": {"type": "issue", "number": issue["number"]},
                         "data": issue,
                     }

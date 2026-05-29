@@ -31,6 +31,9 @@ actions:
     - review_pr
     - merge_gate
     - request_clarification
+    - open_issue
+    - reopen_issue
+    - request_review
 context_refs:
   review_pr:
     - docs/operating-model.md
