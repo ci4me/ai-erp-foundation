@@ -627,6 +627,30 @@ query($owner:String!, $name:String!) {
 
 def resolve_priority(state: RepoState, repo: str) -> tuple[str, dict[str, Any]]:
     """Walk the priority list; return ``(priority_label, context_dict)``."""
+    import dataclasses
+
+    from simulation.tools.item_validator import filter_state
+
+    # Validity / scope gate: hide items the loop must skip (junk labels,
+    # note-only PRs) and, in focus mode, anything outside the loop:active set.
+    # A repo using none of those labels is unaffected.
+    _snap = {
+        "prs": state.open_prs,
+        "issues": state.open_issues,
+        "discussions": state.open_discussions,
+    }
+    _filtered, _ = filter_state(_snap)
+    _kept_pr_nums = {p.get("number") for p in _filtered["prs"]}
+    state = dataclasses.replace(
+        state,
+        open_prs=_filtered["prs"],
+        open_issues=_filtered["issues"],
+        open_discussions=_filtered["discussions"],
+        prs_with_changes_requested=[
+            p for p in state.prs_with_changes_requested if p.get("number") in _kept_pr_nums
+        ],
+    )
+
     personas = _load_persona_index()
 
     if len(state.open_prs) >= 5:
