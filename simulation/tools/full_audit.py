@@ -31,14 +31,22 @@ TEMPLATES = ROOT / ".github" / "action-templates"
 REQUIRED_COLLABORATION_MARKERS = [
     "REQUEST-INFO", "RESPONSE", "ARGUMENT", "COUNTER-PROPOSAL", "REBUTTAL",
     "EVIDENCE", "RESOLUTION", "OBJECTION", "ESCALATION", "EXPLANATION",
-    "DECISION-FROM-LEAD",
+    "DECISION-FROM-LEAD", "CONSENSUS-REACHED",
+    "DECOMPOSE-REQUEST", "SUB-TASK", "DECOMPOSITION-PLAN",
 ]
 REQUIRED_REQUEST_MARKERS = [
     "REQUEST-REPLY-FROM", "REQUEST-REVIEW-FROM", "REQUEST-APPROVAL-FROM", "QUESTION-TO",
 ]
 COLLABORATION_TEMPLATES = [
     "request_info.md", "debate.md", "resolve_debate.md", "escalate.md",
-    "record_adr.md", "explain.md",
+    "record_adr.md", "explain.md", "reach_consensus.md",
+    "decompose_feature.md", "create_sub_issues.md",
+]
+# Problem types that must be wired into the planner's analyzer.
+REQUIRED_DETECTORS = [
+    "UNANSWERED_REQUEST", "REVIEW_DEADLOCK", "UNANSWERED_REQUEST_INFO",
+    "UNRESOLVED_DEBATE", "MISSING_EXPLANATION", "UNRECORDED_ADR",
+    "EPIC_UNDECOMPOSED", "SUBTASKS_NOT_CREATED", "BLOCKED_BY_DEPENDENCY",
 ]
 
 
@@ -104,6 +112,46 @@ def audit_collaboration_templates() -> bool:
     return True
 
 
+def audit_production_readiness() -> bool:
+    """Verify the config knob and analyzer detectors added for hardening."""
+    ok = True
+
+    from simulation.tools import config, state_analyzer
+
+    if not isinstance(getattr(config, "DEBATE_RESOLUTION_TIMEOUT_HOURS", None), int):
+        print("❌ config.DEBATE_RESOLUTION_TIMEOUT_HOURS is missing or not an int.")
+        ok = False
+    else:
+        print(f"✅ config.DEBATE_RESOLUTION_TIMEOUT_HOURS = "
+              f"{config.DEBATE_RESOLUTION_TIMEOUT_HOURS}.")
+
+    if getattr(config, "EPIC_DETECTION_MODE", None) not in ("label", "marker", "heuristic"):
+        print("❌ config.EPIC_DETECTION_MODE is missing or invalid.")
+        ok = False
+    else:
+        print(f"✅ config.EPIC_DETECTION_MODE = {config.EPIC_DETECTION_MODE}.")
+
+    analyzer_src = (ROOT / "simulation" / "tools" / "state_analyzer.py").read_text()
+    missing = [d for d in REQUIRED_DETECTORS if d not in analyzer_src]
+    if missing:
+        print(f"❌ analyzer missing problem detectors: {missing}")
+        ok = False
+    else:
+        print(f"✅ All {len(REQUIRED_DETECTORS)} planner detectors present in state_analyzer.")
+
+    # The plan builder must have a fixer registered for the corrective detectors.
+    from simulation.tools import plan_builder
+
+    for needed in (
+        "MISSING_EXPLANATION", "UNRECORDED_ADR", "UNRESOLVED_DEBATE",
+        "EPIC_UNDECOMPOSED", "SUBTASKS_NOT_CREATED",
+    ):
+        if needed not in plan_builder._FIXERS:
+            print(f"❌ plan_builder has no fixer for {needed}.")
+            ok = False
+    return ok
+
+
 def audit_github_features() -> bool:
     """Warn (don't fail) on optional GitHub-feature wiring."""
     if not (ROOT / ".github" / "CODEOWNERS").exists():
@@ -121,6 +169,7 @@ def main() -> int:
     ok &= audit_markers()
     ok &= audit_actions()
     ok &= audit_collaboration_templates()
+    ok &= audit_production_readiness()
     audit_github_features()
     if ok:
         print("\n🎉 Audit passed.")

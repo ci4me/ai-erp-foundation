@@ -206,7 +206,12 @@ def fetch_discussion_comments(number: Any, repo: str = DEFAULT_REPO) -> list[dic
     if not isinstance(data, list):
         return []
     return [
-        {"body": c.get("body", ""), "author": {"login": (c.get("user") or {}).get("login", "")}}
+        {
+            "body": c.get("body", ""),
+            "author": {"login": (c.get("user") or {}).get("login", "")},
+            "createdAt": c.get("created_at") or c.get("createdAt"),
+            "updatedAt": c.get("updated_at") or c.get("updatedAt"),
+        }
         for c in data
     ]
 

@@ -176,6 +176,18 @@ def validate_collaboration_markers(body: str) -> list[str]:
                 "COUNTER-PROPOSAL must reference another marker/comment "
                 "(a link, #ref, or 'replaces/amends ...')"
             )
+
+    if re.search(r"(?im)^\s*CONSENSUS-REACHED:", body):
+        content = _marker_content(body, "CONSENSUS-REACHED") or ""
+        if not content:
+            errors.append("CONSENSUS-REACHED marker must not be empty")
+        else:
+            handles = {h.lower() for h in re.findall(r"@([a-z0-9][a-z0-9-]+)", content, re.IGNORECASE)}
+            if len(handles) < 2:
+                errors.append(
+                    "CONSENSUS-REACHED must list at least two distinct @persona handles "
+                    "(e.g. 'signees: @a, @b')"
+                )
     return errors
 
 

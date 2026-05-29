@@ -16,9 +16,11 @@ mirrors the markers the autonomous loop needs in order to triage an issue.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from simulation.tools import config
 from simulation.tools.state_fetcher import has_request_marker
 
 REQUIRED_ISSUE_MARKERS = ("TEAM-REQUEST:", "PLAN-REQUEST:", "AUDIT-ISSUE:")
@@ -28,8 +30,16 @@ STALE_DISCUSSION_AGE = timedelta(days=2)
 
 # Markers that indicate an active design debate in a discussion thread.
 DEBATE_MARKERS = ("ARGUMENT:", "COUNTER-PROPOSAL:", "REBUTTAL:", "EVIDENCE:")
+# Markers that count as a debate being resolved.
+DEBATE_RESOLUTION_MARKERS = ("RESOLUTION:", "DECISION-FROM-LEAD:", "CONSENSUS-REACHED:")
 # Two or more objections on a PR signal a stuck review.
 REVIEW_DEADLOCK_THRESHOLD = 2
+# A CI-failure explanation that stays missing this long is flagged.
+MISSING_EXPLANATION_AGE = timedelta(hours=1)
+# Phrase the CI feedback workflow uses to request an explanation.
+CI_FEEDBACK_REQUEST = "EXPLANATION:"
+# Label that opts an issue/PR into automatic ADR recording.
+ADR_CANDIDATE_LABEL = "adr-candidate"
 
 
 def _texts(item: dict[str, Any]) -> list[str]:
@@ -54,17 +64,103 @@ def has_open_request_info(item: dict[str, Any]) -> bool:
     return request_open
 
 
-def has_unresolved_debate(discussion: dict[str, Any]) -> bool:
-    """True iff a discussion has debate markers but no ``RESOLUTION:``/lead decision."""
+def _latest_debate_ts(discussion: dict[str, Any]) -> datetime | None:
+    """Timestamp of the most recent debate-bearing body/comment, or None."""
+    candidates: list[datetime | None] = []
+    body = discussion.get("body") or ""
+    if any(marker in body for marker in DEBATE_MARKERS):
+        candidates.append(_parse_ts(discussion.get("updatedAt") or discussion.get("createdAt")))
+    for comment in discussion.get("comments") or []:
+        cbody = comment.get("body") or ""
+        if any(marker in cbody for marker in DEBATE_MARKERS):
+            candidates.append(_parse_ts(comment.get("createdAt") or comment.get("updatedAt")))
+    stamps = [c for c in candidates if c is not None]
+    return max(stamps) if stamps else None
+
+
+def has_unresolved_debate(
+    discussion: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    timeout_hours: int | None = None,
+) -> bool:
+    """True iff a debate has gone unresolved past the configured timeout.
+
+    A debate is *resolved* by any of ``RESOLUTION:``, ``DECISION-FROM-LEAD:``, or
+    ``CONSENSUS-REACHED:`` (consensus is the preferred, stronger path). An
+    unresolved debate is only flagged once its most recent debate activity is
+    older than ``timeout_hours`` (default
+    :data:`simulation.tools.config.DEBATE_RESOLUTION_TIMEOUT_HOURS`), giving
+    personas time to converge before the planner intervenes. When no timestamp
+    is available the debate is flagged conservatively.
+    """
     joined = "\n".join(_texts(discussion))
     debating = any(marker in joined for marker in DEBATE_MARKERS)
-    resolved = "RESOLUTION:" in joined or "DECISION-FROM-LEAD:" in joined
-    return debating and not resolved
+    resolved = any(marker in joined for marker in DEBATE_RESOLUTION_MARKERS)
+    if not debating or resolved:
+        return False
+
+    if timeout_hours is None:
+        timeout_hours = config.DEBATE_RESOLUTION_TIMEOUT_HOURS
+    now = now or datetime.now(timezone.utc)
+    latest = _latest_debate_ts(discussion)
+    if latest is None:
+        return True
+    return (now - latest) >= timedelta(hours=timeout_hours)
 
 
 def count_objections(pr: dict[str, Any]) -> int:
     """Count ``OBJECTION:`` markers across a PR's body and comments."""
     return sum(text.count("OBJECTION:") for text in _texts(pr))
+
+
+def has_missing_explanation(pr: dict[str, Any], *, now: datetime | None = None) -> bool:
+    """True iff a CI-feedback comment asked for an EXPLANATION that never came.
+
+    Looks for a CI-feedback comment (one that *requests* ``EXPLANATION:`` — it
+    contains the request phrasing) older than :data:`MISSING_EXPLANATION_AGE`,
+    with no later comment that actually opens with an ``EXPLANATION:`` marker.
+    """
+    now = now or datetime.now(timezone.utc)
+    comments = pr.get("comments") or []
+    feedback_ts: datetime | None = None
+    explanation_present = False
+    for comment in comments:
+        body = comment.get("body") or ""
+        ts = _parse_ts(comment.get("createdAt") or comment.get("updatedAt"))
+        is_feedback = CI_FEEDBACK_REQUEST in body and (
+            "post an" in body.lower() or "ci tests failed" in body.lower()
+        )
+        if is_feedback:
+            # Track the oldest unmet feedback request.
+            if feedback_ts is None or (ts and ts < feedback_ts):
+                feedback_ts = ts or feedback_ts
+            continue
+        # A genuine explanation is a marker line, not the request comment.
+        import re as _re
+
+        if _re.search(r"(?im)^\s*EXPLANATION:\s*\S", body):
+            explanation_present = True
+    if feedback_ts is None or explanation_present:
+        return False
+    return (now - feedback_ts) >= MISSING_EXPLANATION_AGE
+
+
+def has_resolution_marker(item: dict[str, Any]) -> bool:
+    """True iff the item's body/comments carry a debate-resolution marker."""
+    joined = "\n".join(_texts(item))
+    return any(marker in joined for marker in DEBATE_RESOLUTION_MARKERS)
+
+
+def adr_already_recorded(item: dict[str, Any], prs: list[dict[str, Any]]) -> bool:
+    """Heuristic: is there already an ``adr``-labeled PR referencing this item?"""
+    number = item.get("number")
+    for pr in prs:
+        if "adr" in _labels(pr):
+            haystack = f"{pr.get('title') or ''}\n{pr.get('body') or ''}"
+            if f"#{number}" in haystack:
+                return True
+    return False
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -88,6 +184,60 @@ def _labels(item: dict[str, Any]) -> list[str]:
         (lbl.get("name", "") if isinstance(lbl, dict) else str(lbl))
         for lbl in (item.get("labels") or [])
     ]
+
+
+# -- epic decomposition + dependency tracking --------------------------------
+
+def is_epic(issue: dict[str, Any], mode: str | None = None) -> bool:
+    """True iff an issue should be treated as an epic needing decomposition.
+
+    Gate depends on :data:`simulation.tools.config.EPIC_DETECTION_MODE`:
+    ``label`` (the safe default) trusts only the ``epic`` label; ``marker`` also
+    accepts a ``DECOMPOSE-REQUEST:`` body marker; ``heuristic`` also treats an
+    over-long body as an epic.
+    """
+    mode = mode or config.EPIC_DETECTION_MODE
+    if "epic" in _labels(issue):
+        return True
+    body = issue.get("body") or ""
+    if mode in ("marker", "heuristic") and "DECOMPOSE-REQUEST:" in body:
+        return True
+    if mode == "heuristic" and len(body) > config.EPIC_BODY_LENGTH_THRESHOLD:
+        return True
+    return False
+
+
+def has_decomposition_plan(issue: dict[str, Any]) -> bool:
+    """True iff a DECOMPOSITION-PLAN appears in the issue body or comments."""
+    return any("DECOMPOSITION-PLAN:" in text for text in _texts(issue))
+
+
+def has_child_issues(state: dict[str, Any], parent_number: Any) -> bool:
+    """True iff some issue links back to ``parent_number`` as its parent epic."""
+    needle = f"Parent epic: #{parent_number}"
+    return any(needle in (i.get("body") or "") for i in state.get("issues", []))
+
+
+def _issue_by_number(state: dict[str, Any], number: int) -> dict[str, Any] | None:
+    return next((i for i in state.get("issues", []) if i.get("number") == number), None)
+
+
+def get_blocking_issues(state: dict[str, Any], issue: dict[str, Any]) -> list[int]:
+    """Return open issues that ``issue`` declares it ``Depends on: #<n>``.
+
+    Only blockers still present in the (open-issues) state count; a referenced
+    issue that is absent is assumed closed/resolved.
+    """
+    blockers: list[int] = []
+    for line in (issue.get("body") or "").splitlines():
+        if line.strip().lower().startswith("depends on:"):
+            for token in re.findall(r"#(\d+)", line):
+                ref = int(token)
+                ref_issue = _issue_by_number(state, ref)
+                if ref_issue is not None and (ref_issue.get("state") or "open") != "closed":
+                    if ref not in blockers:
+                        blockers.append(ref)
+    return blockers
 
 
 def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -237,15 +387,82 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
                     }
                 )
 
-    # Priority 5: debates with no resolution yet.
+    # Priority 5: debates unresolved past the configured timeout.
     for disc in discussions:
-        if has_unresolved_debate(disc):
+        if has_unresolved_debate(disc, now=now):
             problems.append(
                 {
                     "type": "UNRESOLVED_DEBATE",
                     "priority": 5,
                     "target": {"type": "discussion", "number": disc["number"]},
                     "data": disc,
+                }
+            )
+
+    # Priority 5: CI-failure explanations that never arrived.
+    for pr in prs:
+        if has_missing_explanation(pr, now=now):
+            problems.append(
+                {
+                    "type": "MISSING_EXPLANATION",
+                    "priority": 5,
+                    "target": {"type": "pr", "number": pr["number"]},
+                    "data": pr,
+                }
+            )
+
+    # Priority 5: resolved adr-candidate items with no ADR recorded yet.
+    for item in [*issues, *prs]:
+        if (
+            ADR_CANDIDATE_LABEL in _labels(item)
+            and has_resolution_marker(item)
+            and not adr_already_recorded(item, prs)
+        ):
+            kind = "pr" if item in prs else "issue"
+            problems.append(
+                {
+                    "type": "UNRECORDED_ADR",
+                    "priority": 5,
+                    "target": {"type": kind, "number": item["number"]},
+                    "data": item,
+                }
+            )
+
+    # Priority 3: epic decomposition lifecycle.
+    for issue in issues:
+        if not is_epic(issue):
+            continue
+        if not has_decomposition_plan(issue):
+            problems.append(
+                {
+                    "type": "EPIC_UNDECOMPOSED",
+                    "priority": 3,
+                    "target": {"type": "issue", "number": issue["number"]},
+                    "data": issue,
+                }
+            )
+        elif not has_child_issues(state, issue["number"]):
+            problems.append(
+                {
+                    "type": "SUBTASKS_NOT_CREATED",
+                    "priority": 3,
+                    "target": {"type": "issue", "number": issue["number"]},
+                    "data": issue,
+                }
+            )
+
+    # Priority 1: dependency blockers — informational, no corrective action.
+    # The plan builder consults these to skip work on blocked issues.
+    for issue in issues:
+        blockers = get_blocking_issues(state, issue)
+        if blockers:
+            problems.append(
+                {
+                    "type": "BLOCKED_BY_DEPENDENCY",
+                    "priority": 1,
+                    "target": {"type": "issue", "number": issue["number"]},
+                    "data": issue,
+                    "blockers": blockers,
                 }
             )
 
