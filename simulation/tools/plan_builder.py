@@ -571,6 +571,42 @@ def fix_unrecorded_adr(problem: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def fix_team_request_unprocessed(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Bootstrap: open one bounded issue from a TEAM-REQUEST discussion."""
+    disc_num = problem["target"]["number"]
+    body = problem["data"].get("body", "") or ""
+    title = problem["data"].get("title") or "team request"
+    lead = _lead_persona()
+    # Pull the request text after the marker for context.
+    request = ""
+    for line in body.splitlines():
+        if "TEAM-REQUEST:" in line:
+            request = line.split("TEAM-REQUEST:", 1)[1].strip()
+            break
+    reasoning = [
+        f'Discussion #{disc_num} ("{title}") carries a TEAM-REQUEST with no issue yet.',
+        "Opening one bounded needs-triage issue so the lifecycle can begin.",
+    ]
+    markers = [
+        "ISSUE-STATE: CREATED",
+        "",
+        "## Source",
+        f"From discussion #{disc_num}",
+        "",
+        "## Acceptance criteria",
+        f"- [ ] {request or 'satisfy the team request'}",
+    ]
+    return [
+        {
+            "persona": lead,
+            "action": "create_issue",
+            "target": {"type": "discussion", "number": disc_num},
+            "title": (request or title)[:80],
+            "body": _compose_body(lead, reasoning, markers),
+        }
+    ]
+
+
 def fix_epic_undecomposed(problem: dict[str, Any]) -> list[dict[str, Any]]:
     """Ask the Architect to produce a DECOMPOSITION-PLAN for an epic."""
     num = problem["target"]["number"]
@@ -791,6 +827,7 @@ def fix_acceptance_required(problem: dict[str, Any]) -> list[dict[str, Any]]:
 # ACCEPTANCE_BLOCKED now has a fixer (G1): it routes the epic back for rework.
 _FIXERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "UNANSWERED_REQUEST": handle_unanswered_request,
+    "TEAM_REQUEST_UNPROCESSED": fix_team_request_unprocessed,
     "REVIEW_DEADLOCK": fix_review_deadlock,
     "UNANSWERED_REQUEST_INFO": fix_unanswered_request_info,
     "MISSING_EXPLANATION": fix_missing_explanation,

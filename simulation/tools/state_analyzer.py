@@ -597,6 +597,23 @@ def analyze_state(state: dict[str, Any]) -> list[dict[str, Any]]:
                     }
                 )
 
+    # Priority 1: a TEAM-REQUEST discussion with no issue created from it yet.
+    # Bootstraps the lifecycle — turns a fresh human request into one issue.
+    for disc in discussions:
+        body = disc.get("body") or ""
+        if "TEAM-REQUEST:" in body:
+            link = f"From discussion #{disc['number']}"
+            already = any(link in (i.get("body") or "") for i in issues)
+            if not already:
+                problems.append(
+                    {
+                        "type": "TEAM_REQUEST_UNPROCESSED",
+                        "priority": 1,
+                        "target": {"type": "discussion", "number": disc["number"]},
+                        "data": disc,
+                    }
+                )
+
     # Priority 5: debates unresolved past the configured timeout.
     for disc in discussions:
         if has_unresolved_debate(disc, now=now):

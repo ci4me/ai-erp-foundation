@@ -75,7 +75,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_REPO,
         help=f"Target repository owner/name (default: {DEFAULT_REPO}).",
     )
+    parser.add_argument(
+        "--fixture",
+        default=None,
+        help="Path to a JSON state snapshot ({prs,issues,discussions}). When set, "
+        "the planner reads this instead of calling gh — fully offline. Forces "
+        "dry-run unless --apply is also given.",
+    )
     return parser.parse_args(argv)
+
+
+def _load_fixture(path: str) -> dict:
+    """Load a {prs, issues, discussions} state snapshot from JSON."""
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    for key in ("prs", "issues", "discussions"):
+        data.setdefault(key, [])
+    return data
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -83,9 +99,14 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config.resolve(mode=args.mode, apply=args.apply)
     apply_label = "APPLY (mutating)" if cfg.apply else "DRY-RUN (safe)"
 
-    print(f"🚀 Planner mode={cfg.mode.upper()} | {apply_label} | repo={args.repo}")
-    print("📡 Fetching GitHub state...")
-    state = fetch_all_state(args.repo)
+    if args.fixture:
+        print(f"🚀 Planner mode={cfg.mode.upper()} | {apply_label} | fixture={args.fixture}")
+        print("📂 Loading fixture state (offline)...")
+        state = _load_fixture(args.fixture)
+    else:
+        print(f"🚀 Planner mode={cfg.mode.upper()} | {apply_label} | repo={args.repo}")
+        print("📡 Fetching GitHub state...")
+        state = fetch_all_state(args.repo)
     print(
         f"✅ {len(state['prs'])} PRs, {len(state['issues'])} issues, "
         f"{len(state['discussions'])} discussions"

@@ -52,8 +52,18 @@ def _run_capture(
     return result.stdout, ok, error
 
 
-def _command_for(action: str, number: Any, body: str, repo: str) -> Optional[list[str]]:
-    """Map a (non-create) action to its ``gh`` argv list, or None if unknown."""
+def _command_for(
+    action: str, number: Any, body: str, repo: str, *, title: str = ""
+) -> Optional[list[str]]:
+    """Map a (non-create_pr) action to its ``gh`` argv list, or None if unknown."""
+    if action == "create_issue":
+        # Open a new issue (e.g. from a TEAM-REQUEST discussion). The target
+        # number identifies the source discussion, not the new issue.
+        return [
+            "gh", "issue", "create",
+            "--title", title or "Tracked work from team request",
+            "--body", body, "--repo", repo,
+        ]
     if action == "close_pr":
         return ["gh", "pr", "close", str(number), "--comment", body, "--repo", repo]
     if action == "comment_issue":
@@ -100,7 +110,7 @@ def execute_step(step: dict[str, Any], *, apply: bool, repo: str = DEFAULT_REPO)
         _create_pr(persona, number, body, files, apply=apply, repo=repo)
         return
 
-    cmd = _command_for(action, number, body, repo)
+    cmd = _command_for(action, number, body, repo, title=step.get("title", ""))
     if cmd is None:
         logger.log(
             persona=persona, action=action, target=target, prompt_body=body,
