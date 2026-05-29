@@ -31,6 +31,7 @@ actions:
     - implement_scenario
     - prompt_improvement
     - re_ratification
+    - design_solution
 context_refs:
   review_pr:
     - docs/operating-model.md

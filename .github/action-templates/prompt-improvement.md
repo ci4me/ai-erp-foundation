@@ -16,3 +16,15 @@ Source issue: #{{source_issue_number}} - {{source_issue_title}}
 3. Bump the prompt version.
 4. Run prompt regression.
 5. Open a `risk:high` operating-model amendment PR.
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+PROMPT-PATCH: PR_OPENED
+```
+
+Allowed values: `PR_OPENED`, `BLOCKED`.

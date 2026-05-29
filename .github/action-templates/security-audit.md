@@ -14,3 +14,15 @@ Persona: {{persona_name}} (`{{persona_id}}`)
 3. Post threat model with blocking mitigations and evidence.
 
 Use `post_mode={{post_mode}}` for all mutation steps.
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+SECURITY-AUDIT: POSTED
+```
+
+Allowed values: `POSTED`, `BLOCKED`.

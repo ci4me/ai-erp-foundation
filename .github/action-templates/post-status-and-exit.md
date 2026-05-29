@@ -50,3 +50,15 @@ gh issue comment 1 --repo "{{repo}}" --body-file "/tmp/loop-status.md"
 ### Step 3: Stop
 
 Do not open new work unless a future `next_prompt.py` run selects it.
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+LOOP-STATUS: NO_WORK
+```
+
+Allowed values: `NO_WORK`, `BLOCKED`.

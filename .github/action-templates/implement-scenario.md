@@ -122,3 +122,15 @@ Run-ID: ${RUN_ID}
 SUMMARY
 gh issue comment 1 --repo "{{repo}}" --body-file "/tmp/scenario-{{scenario_id}}-summary.md"
 ````
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+SCENARIO-IMPLEMENTATION: PR_OPENED
+```
+
+Allowed values: `PR_OPENED`, `BLOCKED`.

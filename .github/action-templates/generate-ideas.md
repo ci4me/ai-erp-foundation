@@ -8,3 +8,15 @@ description: Nova Idea Lab generation
 Persona: {{persona_name}} (`{{persona_id}}`)
 
 Read only the tiny context declared in the persona prompt. Post exactly five ideas, each as one Discussion with a kill criterion. Do not open Issues directly.
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+IDEAS-POSTED: TRUE
+```
+
+Allowed values: `TRUE`, `FALSE`.

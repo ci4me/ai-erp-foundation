@@ -30,6 +30,7 @@ actions:
   support:
     - re_ratification
     - retrospective
+    - validate_plan
 context_refs:
   review_pr:
     - docs/product-vision.md

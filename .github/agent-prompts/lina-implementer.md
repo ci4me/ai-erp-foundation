@@ -24,6 +24,8 @@ actions:
     - address_changes_requested
   support:
     - implement_scenario
+    - retry_implementation
+    - implement_with_ac
 context_refs:
   implement_issue:
     - docs/operating-model.md

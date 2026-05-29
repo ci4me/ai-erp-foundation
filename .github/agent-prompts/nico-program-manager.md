@@ -26,6 +26,8 @@ actions:
   support:
     - implement_issue
     - promote_idea
+    - facilitate_planning
+    - promote_to_issues
 context_refs:
   triage_issue:
     - docs/friction-budget.md

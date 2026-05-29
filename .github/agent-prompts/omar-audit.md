@@ -11,7 +11,7 @@ verdict_enum: [APPROVE, APPROVE_WITH_CONDITIONS, REQUEST_CHANGES, COMMENT, ABSTA
 activates_on: ["area:audit", "risk:high", "risk:critical", "work:remediation"]
 actions:
   primary: [review_pr, run_audit]
-  support: [security_audit, open_followup_issue, decision_record]
+  support: [security_audit, open_followup_issue, decision_record, consistency_check]
 context_refs:
   review_pr: [docs/amendment-policy.md]
   run_audit: [simulation/tools/README.md]

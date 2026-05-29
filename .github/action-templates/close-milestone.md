@@ -57,3 +57,15 @@ else
   echo "DRY-RUN: gh issue comment 1 --repo {{repo}} --body-file /tmp/milestone-{{milestone_number}}-closed.md"
 fi
 ```
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+MILESTONE-CLOSED: CLOSED
+```
+
+Allowed values: `CLOSED`, `SKIPPED`.

@@ -289,7 +289,7 @@ actions:
 
   - id: design_solution
     priority: 100
-    template: implement-issue.md
+    template: design-solution.md
     class: implementation
     selector: ready_issue_needs_design
     mutates: issue_comment

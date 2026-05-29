@@ -44,3 +44,15 @@ Run-ID: ${RUN_ID}
 GATE
 if [ "{{post_mode}}" = "real" ]; then gh pr review "{{pr_number}}" --repo "{{repo}}" --comment --body-file "/tmp/pr-{{pr_number}}-merge-gate.md"; else echo "DRY-RUN merge gate"; fi
 ```
+
+
+## Required output marker
+
+End your posted comment/review with the machine-readable state marker so the
+autonomous loop can parse the outcome:
+
+```
+RHEA-VERDICT: MERGE_READY
+```
+
+Allowed values: `MERGE_READY`, `BLOCKED`, `HOLD`.
