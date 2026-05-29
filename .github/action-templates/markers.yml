@@ -317,3 +317,38 @@ markers:
 
   # CHAIN-NEXT is intentionally not registered — it has no catalog action;
   # see simulation/tools/loop_speedup.parse_chain_next for the parser.
+
+# Persona request markers (INPUT markers, not action outputs).
+#
+# Unlike the entries under `markers:` above — each the *output* state marker of
+# one catalog action — these are markers a persona *writes into* an issue/PR
+# body to pull other personas into the loop. They have no catalog action of
+# their own, so they live in their own section to keep
+# marker_registry.validate_catalog_coverage() (action <-> marker 1:1) green.
+# Parsed by simulation/tools/state_fetcher.has_request_marker and
+# simulation/tools/plan_builder._parse_requests; surfaced as the priority-0
+# UNANSWERED_REQUEST problem in simulation/tools/state_analyzer.
+request_markers:
+  REQUEST-REPLY-FROM:
+    marker: REQUEST-REPLY-FROM
+    regex: '(?im)^REQUEST-REPLY-FROM:\s*@?[a-z0-9-]+(?:\s*,\s*@?[a-z0-9-]+)*'
+    terminal: false
+    meaning: Request one or more named personas to reply to this issue/PR/discussion.
+
+  REQUEST-REVIEW-FROM:
+    marker: REQUEST-REVIEW-FROM
+    regex: '(?im)^REQUEST-REVIEW-FROM:\s*@?[a-z0-9-]+'
+    terminal: false
+    meaning: Request a named persona to review a PR.
+
+  REQUEST-APPROVAL-FROM:
+    marker: REQUEST-APPROVAL-FROM
+    regex: '(?im)^REQUEST-APPROVAL-FROM:\s*@?[a-z0-9-]+'
+    terminal: false
+    meaning: Request approval from a named persona (plan, merge, etc.).
+
+  QUESTION-TO:
+    marker: QUESTION-TO
+    regex: '(?im)^QUESTION-TO:\s*@?[a-z0-9-]+\?.*'
+    terminal: false
+    meaning: Pose a specific question to a named persona.

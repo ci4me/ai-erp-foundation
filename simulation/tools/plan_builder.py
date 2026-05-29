@@ -298,27 +298,51 @@ _REQUEST_MARKERS: dict[str, str] = {
     "QUESTION-TO:": "question",
 }
 
+# Splits a body into [text, MARKER, arg, MARKER, arg, ...] so each marker's
+# argument is isolated even when several share one physical line (e.g. when a
+# body is created with literal "\n" rather than real newlines).
+_SPLIT_RE = re.compile("(" + "|".join(re.escape(m) for m in _REQUEST_MARKERS) + ")")
+
 # Persona-handle shape: lowercase, hyphen-separated (e.g. ``mara-product-owner``).
 _HANDLE_RE = re.compile(r"@?([a-z0-9][a-z0-9-]+)")
 
 
-def _parse_requests(body: str) -> dict[str, list[str]]:
-    """Extract requested persona ids per marker from an issue/PR body.
+def _parse_requests(body: str) -> list[dict[str, str]]:
+    """Parse persona requests from an issue/PR body, in marker order.
 
-    Only tokens that match a *known* persona id are kept, so free text after a
-    ``QUESTION-TO: @iris-security? is this safe?`` line does not produce bogus
-    handles. Order is preserved and duplicates removed within each bucket.
+    Returns a list of ``{"bucket", "persona", "question"}`` records. Only tokens
+    matching a *known* persona id are kept (so free text after a marker can't
+    fabricate handles), and ``(bucket, persona)`` pairs are de-duplicated. For
+    ``QUESTION-TO: @persona? <text>`` the question text is captured in
+    ``question``; other buckets leave it empty.
     """
     known = {p["id"] for p in _get_registry().load_all()}
-    result: dict[str, list[str]] = {key: [] for key in ("reply", "review", "approval", "question")}
-    for line in (body or "").splitlines():
-        for marker, bucket in _REQUEST_MARKERS.items():
-            if marker in line:
-                segment = line.split(marker, 1)[1].lower()
-                for handle in _HANDLE_RE.findall(segment):
-                    if handle in known and handle not in result[bucket]:
-                        result[bucket].append(handle)
-    return result
+    records: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    parts = _SPLIT_RE.split(body or "")
+    # parts[0] is leading text; thereafter alternates marker, arg, marker, arg...
+    for i in range(1, len(parts), 2):
+        marker = parts[i]
+        arg = parts[i + 1] if i + 1 < len(parts) else ""
+        bucket = _REQUEST_MARKERS[marker]
+
+        if bucket == "question":
+            m = re.match(r"\s*@?([a-z0-9][a-z0-9-]+)\s*\?\s*(.*)", arg, re.IGNORECASE | re.DOTALL)
+            if m and m.group(1).lower() in known:
+                persona = m.group(1).lower()
+                question = m.group(2).strip().split("\n", 1)[0][:300]
+                key = (bucket, persona)
+                if key not in seen:
+                    seen.add(key)
+                    records.append({"bucket": bucket, "persona": persona, "question": question})
+            continue
+
+        for handle in _HANDLE_RE.findall(arg.lower()):
+            if handle in known and (bucket, handle) not in seen:
+                seen.add((bucket, handle))
+                records.append({"bucket": bucket, "persona": handle, "question": ""})
+    return records
 
 
 def _answered_personas(comments: list[dict[str, Any]]) -> set[str]:
@@ -333,22 +357,13 @@ def _answered_personas(comments: list[dict[str, Any]]) -> set[str]:
     return answered
 
 
-def _dedupe(seq: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for item in seq:
-        if item not in seen:
-            seen.add(item)
-            out.append(item)
-    return out
-
-
 def handle_unanswered_request(problem: dict[str, Any]) -> list[dict[str, Any]]:
     """Generate one action per requested persona that has not yet responded.
 
     On an **issue**, requested personas reply via ``comment_issue``; on a **PR**
-    they respond via ``review_pr``. Personas whose ``Persona:`` header already
-    appears in the item's comments are skipped, so a re-run does not re-post.
+    they respond via ``review_pr``. ``QUESTION-TO`` carries the specific question
+    into the generated prompt. Personas whose ``Persona:`` header already appears
+    in the item's comments are skipped, so a re-run does not re-post.
     """
     target = problem["target"]
     data = problem["data"]
@@ -361,21 +376,28 @@ def handle_unanswered_request(problem: dict[str, Any]) -> list[dict[str, Any]]:
     label = "PR" if is_pr else "issue"
     excerpt = " ".join(body[:400].split())
 
-    # On a PR, review/approval/reply all surface as a review; on an issue they
-    # all surface as a comment.
-    requested = _dedupe(
-        requests["review"] + requests["approval"] + requests["reply"] + requests["question"]
-    )
-
     steps: list[dict[str, Any]] = []
-    for persona_id in requested:
+    for record in requests:
+        persona_id = record["persona"]
         if persona_id in answered:
             continue
-        reasoning = [
-            f"@{persona_id} was explicitly requested to respond to {label} #{num}.",
-            "Replying on that persona's behalf so the multi-agent conversation advances.",
-        ]
-        if is_pr:
+        bucket = record["bucket"]
+
+        if bucket == "question":
+            reasoning = [
+                f"@{persona_id} was asked a direct question on {label} #{num}.",
+                f"The question: {record['question']}",
+                "Answering on that persona's behalf to advance the conversation.",
+            ]
+        else:
+            reasoning = [
+                f"@{persona_id} was requested ({bucket}) on {label} #{num}.",
+                "Responding on that persona's behalf so the multi-agent conversation advances.",
+            ]
+
+        # On a PR, review/approval requests surface as a review; everything on an
+        # issue (and replies/questions) surface as a comment.
+        if is_pr and bucket in ("review", "approval"):
             markers = [
                 "REVIEW-VERDICT: COMMENT",
                 f"REVIEW-FROM: @{persona_id}",
@@ -385,8 +407,7 @@ def handle_unanswered_request(problem: dict[str, Any]) -> list[dict[str, Any]]:
                 "",
                 "Provide the substantive review and any required verdict here.",
             ]
-            action = "review_pr"
-            tgt = {"type": "pr", "number": num}
+            action, tgt = "review_pr", {"type": "pr", "number": num}
         else:
             markers = [
                 f"REPLY-FROM: @{persona_id}",
@@ -397,7 +418,8 @@ def handle_unanswered_request(problem: dict[str, Any]) -> list[dict[str, Any]]:
                 "Provide the substantive response and any required markers here.",
             ]
             action = "comment_issue"
-            tgt = {"type": "issue", "number": num}
+            tgt = {"type": target["type"], "number": num}
+
         steps.append(
             {
                 "persona": persona_id,

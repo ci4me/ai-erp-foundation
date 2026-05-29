@@ -27,6 +27,27 @@ print(marker_registry.format_marker_table())
 PY
 ```
 
+## Persona request markers
+
+Separate from the action→output markers above, a persona can place a *request*
+marker in an issue/PR body to pull other personas into the loop. These are
+**input** markers (they have no catalog action of their own), so they live under
+the `request_markers:` section of `markers.yml` and are excluded from the
+action↔marker coverage check.
+
+| Marker | Purpose | Example |
+|--------|---------|---------|
+| `REQUEST-REPLY-FROM: @p1, @p2` | Ask one or more personas to reply | `REQUEST-REPLY-FROM: @mara-product-owner, @tessa-test-lead` |
+| `REQUEST-REVIEW-FROM: @persona` | Ask a persona to review a PR | `REQUEST-REVIEW-FROM: @theo-architect` |
+| `REQUEST-APPROVAL-FROM: @persona` | Ask a persona for approval | `REQUEST-APPROVAL-FROM: @vera-risk-officer` |
+| `QUESTION-TO: @persona? <text>` | Ask a persona a direct question | `QUESTION-TO: @iris-security? Is this endpoint safe?` |
+
+The planner (`scripts/run_planner.py`) treats any of these as the highest-priority
+problem (`UNANSWERED_REQUEST`) and generates one reply/review action per *known*
+persona that has not already responded — so re-running never double-posts. Only
+handles matching a real persona id (from `.github/agent-prompts/*.md`) are
+honored; unknown handles and free text are ignored.
+
 ## Agent output validation
 
 Before posting a GitHub comment/review/discussion response, write the body to a
