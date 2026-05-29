@@ -44,6 +44,7 @@ COLLABORATION_TEMPLATES = [
     "record_adr.md", "explain.md", "reach_consensus.md",
     "decompose_feature.md", "create_sub_issues.md",
     "run_tests.md", "phase_gate.md", "acceptance_review.md",
+    "rework_from_rejection.md",
 ]
 # Problem types that must be wired into the planner's analyzer.
 REQUIRED_DETECTORS = [
@@ -159,6 +160,7 @@ def audit_production_readiness() -> bool:
         "MISSING_EXPLANATION", "UNRECORDED_ADR", "UNRESOLVED_DEBATE",
         "EPIC_UNDECOMPOSED", "SUBTASKS_NOT_CREATED",
         "PHASE_GATE_READY", "TESTING_REQUIRED", "ACCEPTANCE_REQUIRED",
+        "ACCEPTANCE_BLOCKED",
     ):
         if needed not in plan_builder._FIXERS:
             print(f"❌ plan_builder has no fixer for {needed}.")

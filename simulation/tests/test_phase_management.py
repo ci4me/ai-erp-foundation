@@ -132,3 +132,60 @@ def test_acceptance_blocked_is_flagged_and_no_gate():
     state = _wrap([epic])
     assert "ACCEPTANCE_BLOCKED" in _types(state)
     assert phase_gate_ready(state, epic) is None
+
+
+# -- G1: acceptance rejection rework path ------------------------------------
+
+def _blocked_epic(reason="Scope is wrong"):
+    return _issue(
+        103, labels=["epic", "phase/acceptance"],
+        comments=[
+            "REQUEST-APPROVAL-FROM: @product-owner",
+            f"ACCEPTANCE-DECISION: Blocked (reason: {reason})",
+        ],
+    )
+
+
+def test_acceptance_blocked_triggers_rework():
+    state = _wrap([_blocked_epic()])
+    problems = analyze_state(state)
+    assert any(p["type"] == "ACCEPTANCE_BLOCKED" for p in problems)
+    plan = build_plan(problems, mode="multi")
+    bodies = [s["body"] for s in plan["steps"] if s["target"].get("number") == 103]
+    # the rework fixer renders the rework template + a PHASE-CHANGE marker
+    assert any("PHASE-CHANGE: phase/acceptance ->" in b for b in bodies), bodies
+
+
+def test_rework_routes_to_correct_phase():
+    # scope reason -> planning
+    plan = build_plan(analyze_state(_wrap([_blocked_epic("Scope is wrong")])), mode="multi")
+    body = next(s["body"] for s in plan["steps"] if s["target"].get("number") == 103)
+    assert "phase/planning" in body and "-> phase/planning" in body, body
+    # test-coverage reason -> testing
+    plan2 = build_plan(analyze_state(_wrap([_blocked_epic("test coverage too low")])), mode="multi")
+    body2 = next(s["body"] for s in plan2["steps"] if s["target"].get("number") == 103)
+    assert "-> phase/testing" in body2, body2
+
+
+def test_blocked_acceptance_prevents_done():
+    state = _wrap([_blocked_epic()])
+    # phase gate must NOT report ready while a standing Blocked is unresolved
+    assert phase_gate_ready(state, _blocked_epic()) is None
+    assert not any(
+        p["type"] == "PHASE_GATE_READY" and p["target"].get("number") == 103
+        for p in analyze_state(state)
+    )
+
+
+def test_rework_then_reapproval_reaches_done():
+    # After rework + re-acceptance, the latest decision is Approved -> Done.
+    epic = _issue(
+        103, labels=["epic", "phase/acceptance"],
+        comments=[
+            "ACCEPTANCE-DECISION: Blocked (reason: scope)",
+            "PHASE-CHANGE: phase/acceptance -> phase/planning (reason: rework)",
+            "REQUEST-APPROVAL-FROM: @product-owner",
+            "ACCEPTANCE-DECISION: Approved",
+        ],
+    )
+    assert phase_gate_ready(_wrap([epic]), epic) == PHASE_LABELS["done"]
