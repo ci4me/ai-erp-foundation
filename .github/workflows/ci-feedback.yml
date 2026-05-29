@@ -1,0 +1,52 @@
+name: CI Feedback on PR
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  feedback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test deps
+        run: pip install pytest pyyaml
+
+      - name: Run tests
+        id: tests
+        run: |
+          if python3 -m pytest simulation/tests -q; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post feedback comment on failure
+        if: steps.tests.outputs.status == 'fail'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              "CI tests failed on this PR.",
+              "",
+              "Please review the test output and post an `EXPLANATION:` marker",
+              "describing the cause and the fix plan.",
+            ].join("\n");
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });

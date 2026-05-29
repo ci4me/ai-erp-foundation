@@ -352,3 +352,80 @@ request_markers:
     regex: '(?im)^QUESTION-TO:\s*@?[a-z0-9-]+\?.*'
     terminal: false
     meaning: Pose a specific question to a named persona.
+
+# Collaboration markers (debate / clarification / escalation / decisions).
+#
+# Like request_markers, these are written *into* issue/PR/discussion bodies and
+# comments to drive multi-persona collaboration; they have no catalog action of
+# their own, so they live outside the action<->marker `markers:` map (keeping
+# marker_registry.validate_catalog_coverage green). Parsed by
+# simulation/tools/marker_registry.collaboration_marker_names and validated by
+# simulation/tools/agent_output_validator.validate_collaboration_markers.
+# Detected as new planner problems in simulation/tools/state_analyzer
+# (unanswered_request_info, unresolved_debate, review_deadlock).
+collaboration_markers:
+  REQUEST-INFO:
+    marker: REQUEST-INFO
+    regex: '(?im)^REQUEST-INFO:\s*\S.*'
+    terminal: false
+    meaning: Ask a clarifying question that blocks progress until answered.
+
+  RESPONSE:
+    marker: RESPONSE
+    regex: '(?im)^RESPONSE:\s*\S.*'
+    terminal: false
+    meaning: Answer to a REQUEST-INFO, unblocking progress.
+
+  ARGUMENT:
+    marker: ARGUMENT
+    regex: '(?im)^ARGUMENT:\s*\S.*'
+    terminal: false
+    meaning: Reasoned position in a design debate.
+
+  COUNTER-PROPOSAL:
+    marker: COUNTER-PROPOSAL
+    regex: '(?im)^COUNTER-PROPOSAL:\s*\S.*'
+    terminal: false
+    meaning: Alternative to a previous proposal (must reference it).
+
+  REBUTTAL:
+    marker: REBUTTAL
+    regex: '(?im)^REBUTTAL:\s*\S.*'
+    terminal: false
+    meaning: Reasoned disagreement with a prior position.
+
+  EVIDENCE:
+    marker: EVIDENCE
+    regex: '(?im)^EVIDENCE:\s*\S.*'
+    terminal: false
+    meaning: Supporting data, benchmarks, or citations.
+
+  RESOLUTION:
+    marker: RESOLUTION
+    regex: '(?im)^RESOLUTION:\s*\S.*'
+    terminal: true
+    meaning: Final decision after a debate (approved/vetoed by a persona).
+
+  OBJECTION:
+    marker: OBJECTION
+    regex: '(?im)^OBJECTION:\s*\S.*'
+    terminal: false
+    meaning: Formal objection to a review or merge.
+
+  ESCALATION:
+    marker: ESCALATION
+    regex: '(?im)^ESCALATION:\s*\S.*'
+    terminal: false
+    meaning: Request a higher-authority (Lead) persona to decide.
+
+  EXPLANATION:
+    marker: EXPLANATION
+    regex: '(?im)^EXPLANATION:\s*\S.*'
+    terminal: false
+    meaning: Detailed explanation of a design or code block (durable doc).
+
+  DECISION-FROM-LEAD:
+    marker: DECISION-FROM-LEAD
+    regex: '(?im)^DECISION-FROM-LEAD:\s*\S.*'
+    terminal: true
+    meaning: Binding decision from the Lead persona after escalation.

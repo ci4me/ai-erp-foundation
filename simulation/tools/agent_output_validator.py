@@ -122,6 +122,63 @@ class ValidationResult:
     action: str | None = None
 
 
+# Collaboration markers that must carry non-empty content when present.
+_NONEMPTY_COLLAB_MARKERS = (
+    "REQUEST-INFO",
+    "RESPONSE",
+    "ARGUMENT",
+    "REBUTTAL",
+    "EVIDENCE",
+    "OBJECTION",
+    "ESCALATION",
+    "EXPLANATION",
+    "DECISION-FROM-LEAD",
+)
+
+
+def _marker_content(body: str, marker: str) -> str | None:
+    """Return the text after ``marker:`` on its line, or None if absent."""
+    match = re.search(rf"(?im)^\s*{re.escape(marker)}:\s*(.*)$", body)
+    return match.group(1).strip() if match else None
+
+
+def validate_collaboration_markers(body: str) -> list[str]:
+    """Validate collaboration markers when present (no-op if none appear).
+
+    Rules:
+    - REQUEST-INFO/RESPONSE/ARGUMENT/REBUTTAL/EVIDENCE/OBJECTION/ESCALATION/
+      EXPLANATION/DECISION-FROM-LEAD must be non-empty.
+    - RESOLUTION must state a decision and ``(approved/vetoed by <persona>)``.
+    - COUNTER-PROPOSAL must reference another marker/comment (link, #ref, or
+      replaces/amends ...).
+    """
+    errors: list[str] = []
+    for marker in _NONEMPTY_COLLAB_MARKERS:
+        if re.search(rf"(?im)^\s*{re.escape(marker)}:", body):
+            if not _marker_content(body, marker):
+                errors.append(f"{marker} marker must not be empty")
+
+    if re.search(r"(?im)^\s*RESOLUTION:", body):
+        content = _marker_content(body, "RESOLUTION") or ""
+        if not re.search(r"\b(approved|vetoed)\s+by\s+\S+", content, re.IGNORECASE):
+            errors.append("RESOLUTION must state a decision and '(approved/vetoed by <persona>)'")
+
+    if re.search(r"(?im)^\s*COUNTER-PROPOSAL:", body):
+        content = _marker_content(body, "COUNTER-PROPOSAL") or ""
+        references = (
+            re.search(r"https?://", content)
+            or re.search(r"#\d+", content)
+            or re.search(r"\b(replaces|amends)\b", content, re.IGNORECASE)
+            or re.search(r"[A-Z][A-Z-]+:", content)
+        )
+        if not references:
+            errors.append(
+                "COUNTER-PROPOSAL must reference another marker/comment "
+                "(a link, #ref, or 'replaces/amends ...')"
+            )
+    return errors
+
+
 def parse_persona_header(body: str) -> tuple[dict[str, Any], str]:
     """Parse a leading YAML persona header from an agent output."""
     if not body.startswith("---\n"):
@@ -286,6 +343,10 @@ def validate_agent_output(
         diff_like = re.search(r"diff\s+hunk|@@\s+-\d+", remainder, re.IGNORECASE)
         if not evidence_like and not diff_like:
             errors.append("review_pr output lacks path:line or diff-hunk evidence")
+
+    # Collaboration markers are additive and presence-gated: outputs that carry
+    # none of them are unaffected.
+    errors.extend(validate_collaboration_markers(body))
 
     return ValidationResult(valid=not errors, errors=errors, header=header, verdict=verdict, action=action)
 

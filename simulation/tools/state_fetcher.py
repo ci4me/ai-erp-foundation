@@ -36,11 +36,34 @@ REQUEST_MARKERS: tuple[str, ...] = (
     "QUESTION-TO:",
 )
 
+# Collaboration markers (debate / clarification / escalation / decisions). Their
+# presence in a body is the cheap signal that an item's comments are worth
+# fetching for the collaboration detectors in state_analyzer.
+COLLABORATION_MARKERS: tuple[str, ...] = (
+    "REQUEST-INFO:",
+    "RESPONSE:",
+    "ARGUMENT:",
+    "COUNTER-PROPOSAL:",
+    "REBUTTAL:",
+    "EVIDENCE:",
+    "RESOLUTION:",
+    "OBJECTION:",
+    "ESCALATION:",
+    "EXPLANATION:",
+    "DECISION-FROM-LEAD:",
+)
+
 
 def has_request_marker(text: str | None) -> bool:
     """True iff ``text`` contains any persona-request marker."""
     text = text or ""
     return any(marker in text for marker in REQUEST_MARKERS)
+
+
+def has_collaboration_marker(text: str | None) -> bool:
+    """True iff ``text`` contains any collaboration marker."""
+    text = text or ""
+    return any(marker in text for marker in COLLABORATION_MARKERS)
 
 
 def run_gh(
@@ -122,13 +145,9 @@ def fetch_prs(repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             pr["reviews"] = []
         pr["has_code"] = _has_code(pr)
-        # Only fetch comments when a request marker makes them relevant — keeps
-        # the common path to one API call per PR.
-        pr["comments"] = (
-            fetch_comments("pr", pr["number"], repo)
-            if has_request_marker(pr.get("body"))
-            else []
-        )
+        # PRs are few, and review-deadlock detection (OBJECTION markers) lives in
+        # PR comments, so always fetch them.
+        pr["comments"] = fetch_comments("pr", pr["number"], repo)
     return prs
 
 
@@ -143,9 +162,12 @@ def fetch_issues(repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
     )
     issues: list[dict[str, Any]] = json.loads(raw) if raw.strip() else []
     for issue in issues:
+        # Issues are numerous, so only pay for comments when the body already
+        # signals a request/collaboration thread worth inspecting.
+        body = issue.get("body")
         issue["comments"] = (
             fetch_comments("issue", issue["number"], repo)
-            if has_request_marker(issue.get("body"))
+            if has_request_marker(body) or has_collaboration_marker(body)
             else []
         )
     return issues
@@ -163,18 +185,49 @@ def _normalize_discussion(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def fetch_discussion_comments(number: Any, repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
+    """Fetch a discussion's comments via REST (best-effort, [] on failure).
+
+    Normalizes to ``{"body", "author": {"login"}}`` so collaboration detectors
+    can read comments uniformly across issues, PRs, and discussions.
+    """
+    raw = run_gh(
+        ["api", f"/repos/{repo}/discussions/{number}/comments"],
+        repo,
+        check=False,
+        repo_flag=False,
+    )
+    if not raw.strip():
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [
+        {"body": c.get("body", ""), "author": {"login": (c.get("user") or {}).get("login", "")}}
+        for c in data
+    ]
+
+
 def fetch_discussions(repo: str = DEFAULT_REPO) -> list[dict[str, Any]]:
     """Fetch open discussions, preferring the REST endpoint, GraphQL as fallback.
 
-    Repos/tokens without the Discussions feature yield an empty list rather than
-    an error, so the planner keeps running on its PR/issue findings.
+    Each discussion is annotated with its ``comments`` so the debate detector can
+    inspect the thread. Repos/tokens without the Discussions feature yield an
+    empty list rather than an error, so the planner keeps running on its
+    PR/issue findings.
     """
     rest = run_gh(["api", f"/repos/{repo}/discussions"], repo, check=False, repo_flag=False)
     if rest.strip():
         try:
             data = json.loads(rest)
             if isinstance(data, list):
-                return [_normalize_discussion(d) for d in data]
+                discussions = [_normalize_discussion(d) for d in data]
+                for disc in discussions:
+                    disc["comments"] = fetch_discussion_comments(disc["number"], repo)
+                return discussions
         except json.JSONDecodeError:
             pass
 

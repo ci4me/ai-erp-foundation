@@ -23,10 +23,13 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from simulation.tools import config
 from simulation.tools.persona_registry import DEFAULT_MODEL, PersonaRegistry
+
+_TEMPLATE_DIR = Path(".github/action-templates")
 
 _registry: Optional[PersonaRegistry] = None
 
@@ -431,14 +434,97 @@ def handle_unanswered_request(problem: dict[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
+# -----------------------------------------------------------------------------
+# Collaboration fixers — clarification, debate resolution, deadlock escalation.
+# -----------------------------------------------------------------------------
+
+def _render_template(name: str, **subs: Any) -> str:
+    """Render a ``.github/action-templates`` file, substituting ``{{ key }}``."""
+    text = (_TEMPLATE_DIR / name).read_text(encoding="utf-8")
+    for key, value in subs.items():
+        text = re.sub(r"{{\s*" + re.escape(key) + r"\s*}}", str(value), text)
+    return text
+
+
+def _lead_persona() -> str:
+    """The Lead persona: the executive-layer orchestrator (fallback ari)."""
+    lead = _get_registry().get_persona_by_layer("executive")
+    return lead["id"] if lead else "ari-orchestrator"
+
+
+def fix_unanswered_request_info(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Answer an issue's open REQUEST-INFO with a RESPONSE so work can proceed."""
+    num = problem["target"]["number"]
+    lead = _lead_persona()
+    reasoning = [
+        f"Issue #{num} has an open REQUEST-INFO marker with no RESPONSE yet.",
+        "Posting the requested information unblocks the task.",
+    ]
+    markers = [
+        "RESPONSE: provide the requested information here so the loop can proceed.",
+    ]
+    return [
+        {
+            "persona": lead,
+            "action": "comment_issue",
+            "target": {"type": "issue", "number": num},
+            "body": _compose_body(lead, reasoning, markers),
+        }
+    ]
+
+
+def fix_unresolved_debate(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Record a RESOLUTION (or escalate) on a debate that has no decision yet."""
+    num = problem["target"]["number"]
+    lead = _lead_persona()
+    reasoning = [
+        f"Discussion #{num} has debate markers (ARGUMENT/COUNTER-PROPOSAL/...) "
+        "but no RESOLUTION or DECISION-FROM-LEAD.",
+        "Reviewing the thread to record a resolution or escalate to the Lead.",
+    ]
+    rendered = _render_template("resolve_debate.md", persona=lead, target_number=num)
+    return [
+        {
+            "persona": lead,
+            "action": "comment_discussion",
+            "target": {"type": "discussion", "number": num},
+            "body": _compose_body(lead, reasoning, [rendered]),
+        }
+    ]
+
+
+def fix_review_deadlock(problem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Escalate a PR whose review is stuck behind repeated OBJECTION markers."""
+    num = problem["target"]["number"]
+    lead = _lead_persona()
+    reasoning = [
+        f"PR #{num} carries two or more OBJECTION markers — the review is deadlocked.",
+        "Escalating to the Lead persona to make a binding decision.",
+    ]
+    rendered = _render_template(
+        "escalate.md", persona=lead, target_type="PR", target_number=num, lead_persona=lead
+    )
+    return [
+        {
+            "persona": lead,
+            "action": "review_pr",
+            "target": {"type": "pr", "number": num},
+            "body": _compose_body(lead, reasoning, [rendered]),
+        }
+    ]
+
+
 # Dispatch table: problem type -> fixer.
 _FIXERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "UNANSWERED_REQUEST": handle_unanswered_request,
+    "REVIEW_DEADLOCK": fix_review_deadlock,
+    "UNANSWERED_REQUEST_INFO": fix_unanswered_request_info,
     "EMPTY_PR": fix_empty_pr,
     "MISSING_MARKER": fix_missing_marker,
     "TRIVIAL_NOT_IMPLEMENTED": implement_trivial_issue,
     "UNREVIEWED_PR": review_unreviewed_pr,
     "STALE_DISCUSSION": resolve_stale_discussion,
+    "UNRESOLVED_DEBATE": fix_unresolved_debate,
 }
 
 

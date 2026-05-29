@@ -201,3 +201,37 @@ class PersonaRegistry:
         """Return the default model for a persona id (or the global default)."""
         persona = self.get_persona(persona_id)
         return persona["model"] if persona else DEFAULT_MODEL
+
+
+def generate_codeowners(repo_root: str = ".") -> str:
+    """Generate ``.github/CODEOWNERS`` content from persona frontmatter.
+
+    Personas are AI agents, not GitHub users, so a CODEOWNERS rule that named a
+    persona id would reference a non-existent account and could block PRs. To
+    stay safe, a rule is emitted ONLY for a persona that declares BOTH a real
+    ``github_handle`` and an ``owns_paths`` list in its frontmatter. None do
+    today, so the output is intentionally header-only until that data exists.
+    """
+    registry = PersonaRegistry(repo_root=repo_root)
+    header = [
+        "# Auto-generated CODEOWNERS — do not edit by hand.",
+        "# Source: simulation/tools/persona_registry.generate_codeowners",
+        "#",
+        "# A rule is emitted only for personas that declare BOTH `github_handle`",
+        "# and `owns_paths` in their frontmatter. Personas are AI agents (not",
+        "# GitHub users), so this file stays header-only until real ownership",
+        "# data is added — avoiding rules that reference non-existent accounts.",
+        "",
+    ]
+    rules: list[str] = []
+    if registry.prompts_dir.exists():
+        for md_file in sorted(registry.prompts_dir.glob("*.md")):
+            fm = registry._parse_frontmatter(md_file.read_text(encoding="utf-8"))
+            if not fm.get("id"):
+                continue
+            handle = fm.get("github_handle")
+            owns = fm.get("owns_paths") or []
+            if handle and isinstance(owns, list):
+                for area in owns:
+                    rules.append(f"/{str(area).strip('/')}/ @{handle}")
+    return "\n".join(header + rules) + "\n"

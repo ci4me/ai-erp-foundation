@@ -1,0 +1,8 @@
+# Auto-generated CODEOWNERS — do not edit by hand.
+# Source: simulation/tools/persona_registry.generate_codeowners
+#
+# A rule is emitted only for personas that declare BOTH `github_handle`
+# and `owns_paths` in their frontmatter. Personas are AI agents (not
+# GitHub users), so this file stays header-only until real ownership
+# data is added — avoiding rules that reference non-existent accounts.
+

@@ -142,6 +142,23 @@ from simulation.tools.lesson_repository import (
 from simulation.tools.lesson_injector import LessonInjector
 from simulation.tools.retrospective import Retrospective
 
+# Compatibility re-exports: callers such as simulation.tools.action_coverage
+# treat this facade as the public API. These names live in next_prompt_legacy
+# while the extract-models-config refactor is in progress; surfacing them here
+# keeps the coverage tooling (and its test) working against next_prompt.*.
+from simulation.tools.next_prompt_validation import validate_static_config  # noqa: E402,F401
+from simulation.tools.next_prompt_legacy import (  # noqa: E402,F401
+    ACTION_TEMPLATES_DIR,
+    REPO_ROOT,
+    _as_list,
+    _load_action_catalog,
+    _load_persona_index,
+    _normalize_persona_token,
+    _persona_aliases,
+    _scenario_catalog,
+    _template_name_for_action,
+)
+
 
 def enhance_prompt_with_lessons(
     *,
