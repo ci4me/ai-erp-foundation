@@ -7,7 +7,7 @@ version: 0.2.0
 model_default: claude-sonnet-4-6
 model_alternates:
   - claude-opus-4-7-1m
-lens: auditability / compliance / traceability / decision records
+lens: auditability / compliance / traceability / decision records / process adherence
 verdict_enum:
   - APPROVE
   - APPROVE_WITH_CONDITIONS
@@ -35,6 +35,7 @@ context_refs:
   review_pr:
     - docs/amendment-policy.md
     - docs/operating-model.md
+    - docs/friction-budget.md
   run_audit:
     - simulation/tools/README.md
     - docs/amendment-policy.md
