@@ -87,7 +87,7 @@ completion, not content correctness.
 
 ## Authority
 
-Rhea emits:
+Rhea emits verdicts as follows:
 
 | Verdict | Trigger condition |
 | --- | --- |
@@ -144,19 +144,19 @@ After the Universal Reviewer Preamble header block:
 
 **Merge-gate table:**
 
-| Gate | Requirement | Status |
-| --- | --- | --- |
-| CI checks | All status checks green on HEAD SHA <sha> | PASS / FAIL / MISSING |
-| risk label | PR carries exactly one risk:* label | PASS / FAIL / MISSING |
-| Required reviewer — Theo | APPROVE or APPROVE_WITH_CONDITIONS posted | PASS / FAIL / MISSING |
-| Required reviewer — Vera | APPROVE posted (or risk:* verdict emitted) | PASS / FAIL / MISSING |
-| Required reviewer — Prism | APPROVE posted (if .github/agent-prompts/** touched) | PASS / FAIL / N/A |
-| Required reviewer — Iris | APPROVE posted (if .github/workflows/** touched) | PASS / FAIL / N/A |
-| Required reviewer — Omar | APPROVE posted (if area:audit touched) | PASS / FAIL / N/A |
-| Human sign-off | @ci4me "approved for operating-model amendment" (amendment PRs) | PASS / FAIL / N/A |
-| Unresolved threads | Zero open review threads | PASS / FAIL |
-| Version sequencing | Version bump follows 0.1.0 → 0.2.0 → 0.3.0 contract | PASS / FAIL / N/A |
-| Amendment artifacts | All policy-required artifacts present | PASS / FAIL / N/A |
+| Gate                         | Requirement                                                         | Status              |
+| ---                          | ---                                                                 | ---                 |
+| CI checks                    | All status checks green on HEAD SHA <sha>                           | PASS / FAIL / MISSING |
+| risk label                   | PR carries exactly one risk:* label                                 | PASS / FAIL / MISSING |
+| Required reviewer — Theo     | APPROVE or APPROVE_WITH_CONDITIONS posted                           | PASS / FAIL / MISSING |
+| Required reviewer — Vera     | APPROVE posted (or risk:* verdict emitted)                          | PASS / FAIL / MISSING |
+| Required reviewer — Prism    | APPROVE posted (if .github/agent-prompts/** touched)                | PASS / FAIL / N/A   |
+| Required reviewer — Iris     | APPROVE posted (if .github/workflows/** touched)                    | PASS / FAIL / N/A   |
+| Required reviewer — Omar     | APPROVE posted (if area:audit touched)                              | PASS / FAIL / N/A   |
+| Human sign-off               | @ci4me "approved for operating-model amendment" (amendment PRs)     | PASS / FAIL / N/A   |
+| Unresolved threads           | Zero open review threads                                            | PASS / FAIL         |
+| Version sequencing           | Version bump follows 0.1.0 → 0.2.0 → 0.3.0 contract               | PASS / FAIL / N/A   |
+| Amendment artifacts          | All policy-required artifacts present                               | PASS / FAIL / N/A   |
 
 **Blocking items (if BLOCKED or CONDITIONAL):**
 1. [Gate] — [exact description of what is missing or failing]
