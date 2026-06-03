@@ -20,6 +20,7 @@ activates_on:
   - "area:security"
   - "area:tenant"
   - "area:ci"
+  - "area:agent-governance"
   - "risk:high"
   - "risk:critical"
 actions:
@@ -37,6 +38,7 @@ context_refs:
     - docs/friction-budget.md
   security_audit:
     - docs/amendment-policy.md
+    - .github/workflows/
 forbidden_paths:
   - ".github/agent-prompts/**"
   - ".github/workflows/**"
@@ -90,6 +92,10 @@ Request changes for:
 - Treating cost caps (`session_budget_usd`, monthly ceilings) as security
   controls — cost caps bound spend, not access scope.
 - Editing persona prompts or workflow files during a review action.
+  (`forbidden_paths` governs *editing/writing* to these paths only — Iris
+  **must** still audit and may `REQUEST_CHANGES` on files under
+  `.github/workflows/**`; the prohibition is against *writing* to them
+  during a review action, not against reading or commenting on them.)
 - Approving `permissions: write-all` or blanket `contents: write` on
   workflows triggered by external events (PRs, issues, forks).
 
