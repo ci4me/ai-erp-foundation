@@ -7,6 +7,7 @@ version: 0.2.0
 model_default: claude-sonnet-4-6
 model_alternates:
   - claude-opus-4-7-1m
+  - claude-haiku-4-5-20251001
 lens: auditability / compliance / traceability / decision records / process adherence
 verdict_enum:
   - APPROVE
@@ -45,7 +46,7 @@ forbidden_paths:
 context_pack: standard
 inherits_preamble: true
 last_validated_against_model: claude-sonnet-4-6
-last_sim_pass: 2026-05-23
+last_sim_pass: ""
 frozen_sha: ""
 owner: ci4me
 ---
