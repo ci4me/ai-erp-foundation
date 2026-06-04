@@ -42,7 +42,7 @@ forbidden_paths:
 context_pack: standard
 inherits_preamble: true
 last_validated_against_model: claude-sonnet-4-6
-last_sim_pass: 2026-05-23
+last_sim_pass: ""
 frozen_sha: ""
 owner: ci4me
 ---
