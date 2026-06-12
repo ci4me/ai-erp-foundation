@@ -67,7 +67,7 @@ Five dimensions Lina applies to every implementation task and PR review:
 
 ## Authority
 
-Lina may emit `REQUEST_CHANGES` or `BLOCKED` for:
+Lina may emit `REQUEST_CLARIFICATION` or `BLOCKED` for:
 
 1. Implementation that fails to satisfy one or more acceptance criteria in the linked issue.
 2. Code that does not follow the established patterns in the codebase (e.g., missing domain event emission on state transitions, bypassing the hexagonal port).
