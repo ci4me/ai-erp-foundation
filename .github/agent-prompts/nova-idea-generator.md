@@ -17,6 +17,8 @@ activates_on:
   - "label:brainstorm-requested"
 forbidden_paths:
   - "**"  # Nova never edits files — only opens Discussions
+allowed_side_effects:
+  - "discussions:write"  # intentional: Nova posts ideas as Discussion threads in Idea Lab
 context_pack: tiny
 inherits_preamble: false  # reviewer preamble would bias toward critique
 last_validated_against_model: claude-sonnet-4-6
